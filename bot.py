@@ -112,7 +112,7 @@
   <div class="container">
     <!-- TAB 1: ASOSIY -->
     <div id="tab-home" class="tab-page active">
-      <div class="greeting">Хайрли кун</div>
+      <div class="greeting" id="greetingText">Хайрли кун</div>
       <div class="username" id="userName">МИЖОЗ</div>
       <div class="bonus-card">
         <div class="bonus-label">БОНУС</div>
@@ -218,6 +218,13 @@
     const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
     if (tg) { tg.expand(); tg.ready(); }
 
+    // Soatga qarab salomlashish
+    const hour = new Date().getHours();
+    let greet = "Хайрли кеч";
+    if (hour >= 5 && hour < 12) greet = "Хайрли тонг";
+    else if (hour >= 12 && hour < 18) greet = "Хайрли кун";
+    document.getElementById("greetingText").textContent = greet;
+
     const tgUser = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? tg.initDataUnsafe.user : {};
     const userId = tgUser.id || 0;
     const fullName = [tgUser.first_name, tgUser.last_name].filter(Boolean).join(" ") || "Мижоз";
@@ -256,7 +263,7 @@
 
     async function loadProducts() {
       try {
-        const res = await fetch(API_BASE + "/api/products");
+        const res = await fetch(API_BASE + "/api/products?t=" + Date.now());
         const data = await res.json();
         products = data.products || [];
         buildCategories();
@@ -280,22 +287,22 @@
       renderProducts();
     }
 
-    function getCategoryVisual(cat) {
-      const c = (cat || "").toLowerCase();
-      if (c.includes("омега") || c.includes("рыб")) return { icon: "🐟", bg: "linear-gradient(135deg,#fef3c7,#fde68a)", label: "OMEGA-3" };
-      if (c.includes("дет")) return { icon: "🧸", bg: "linear-gradient(135deg,#fce7f3,#fbcfe8)", label: "KIDS" };
-      if (c.includes("фито") || c.includes("трав") || c.includes("экстракт")) return { icon: "🌿", bg: "linear-gradient(135deg,#dcfce7,#bbf7d0)", label: "PHYTO" };
-      if (c.includes("сустав") || c.includes("кост")) return { icon: "🦴", bg: "linear-gradient(135deg,#e0e7ff,#c7d2fe)", label: "OSTEO" };
-      if (c.includes("минерал")) return { icon: "💎", bg: "linear-gradient(135deg,#cffafe,#a5f3fc)", label: "MINERAL" };
-      if (c.includes("иммун")) return { icon: "🛡️", bg: "linear-gradient(135deg,#ffedd5,#fed7aa)", label: "IMMUNO" };
-      if (c.includes("желуд") || c.includes("пищевар") || c.includes("пробио")) return { icon: "🧬", bg: "linear-gradient(135deg,#f3e8ff,#e9d5ff)", label: "BIO" };
+    function getCategoryVisual(cat, name) {
+      const text = ((cat || "") + " " + (name || "")).toLowerCase();
+      if (text.includes("омега") || text.includes("рыб")) return { icon: "🐟", bg: "linear-gradient(135deg,#fef3c7,#fde68a)", label: "OMEGA-3" };
+      if (text.includes("дет") || text.includes("кидс") || text.includes("бэби")) return { icon: "🧸", bg: "linear-gradient(135deg,#fce7f3,#fbcfe8)", label: "KIDS" };
+      if (text.includes("сироп") || text.includes("масло") || text.includes("экстракт") || text.includes("фито") || text.includes("трав") || text.includes("чай")) return { icon: "🌿", bg: "linear-gradient(135deg,#dcfce7,#bbf7d0)", label: "PHYTO" };
+      if (text.includes("сустав") || text.includes("кост") || text.includes("кальц") || text.includes("коллаген")) return { icon: "🦴", bg: "linear-gradient(135deg,#e0e7ff,#c7d2fe)", label: "OSTEO" };
+      if (text.includes("магн") || text.includes("цинк") || text.includes("желез") || text.includes("минерал") || text.includes("селен")) return { icon: "💎", bg: "linear-gradient(135deg,#cffafe,#a5f3fc)", label: "MINERAL" };
+      if (text.includes("иммун") || text.includes("вит с") || text.includes("витамин с") || text.includes("вит d") || text.includes("витамин d")) return { icon: "🛡️", bg: "linear-gradient(135deg,#ffedd5,#fed7aa)", label: "IMMUNO" };
+      if (text.includes("желуд") || text.includes("пищевар") || text.includes("пробио") || text.includes("лакто") || text.includes("бифидо")) return { icon: "🧬", bg: "linear-gradient(135deg,#f3e8ff,#e9d5ff)", label: "BIO" };
       return { icon: "💊", bg: "linear-gradient(135deg,#dbeafe,#bfdbfe)", label: "VITAMIN" };
     }
 
     function cardHTML(p) {
       const qty = cart[p.id] || 0;
       const inStock = (p.stock || 0) > 0;
-      const vis = getCategoryVisual(p.category);
+      const vis = getCategoryVisual(p.category, p.name);
       const imgBlock = p.image
         ? `<img src="${p.image}" alt="${p.name}" />`
         : `<div style="width:100%;height:100%;background:${vis.bg};display:flex;flex-direction:column;align-items:center;justify-content:center;">
