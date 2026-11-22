@@ -1,3 +1,7 @@
 pyTelegramBotAPI
 flask
+flask-cors
+pandas
 openpyxl
+requests
+duckduckgo-search
