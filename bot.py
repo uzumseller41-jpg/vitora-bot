@@ -13,12 +13,13 @@ from duckduckgo_search import DDGS
 # ================= SOZLAMALAR =================
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "9250053752:AAHW1tI5OZAXio-fcbnIy-wF24yOxIEQGCk")
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "5055854613"))
+RENDER_URL = "https://vitora-bot.onrender.com"
 WEBAPP_URL = "https://uzumseller41-jpg.github.io/vitora-shop/?v=2"
 EXCEL_FILE = "Vitora_Smart_Pharm_BAD_Tovarlar.xlsx"
 DB_FILE = "vitora.db"
 HUMO_CARD = "9860 1501 1189 2918"
 
-bot = telebot.TeleBot(BOT_TOKEN)
+bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 app = Flask(__name__)
 CORS(app)
 autofill_running = False
@@ -122,7 +123,6 @@ auto_seed_from_excel()
 
 # ================= INTERNETDAN RASM QIDIRISH =================
 def clean_query_name(name):
-    # Qavs ichidagi zavod nomlarini tozalab aniq qidiruv so'zi yasash
     q = re.sub(r"\(.*?\)", "", name)
     q = q.replace("№", " ").replace(",", " ")
     q = " ".join(q.split()[:5])
@@ -291,7 +291,23 @@ def handle_receipt_photo(message):
     bot.reply_to(message, "✅ To'lov chekingiz adminga yuborildi! Tez orada tasdiqlanadi.")
 
 
-# ================= FLASK API (MINI APP UCHUN) =================
+# ================= WEBHOOK VA FLASK API =================
+@app.route("/webhook", methods=["POST"])
+def telegram_webhook():
+    json_str = request.get_data().decode("UTF-8")
+    update = telebot.types.Update.de_json(json_str)
+    bot.process_new_updates([update])
+    return "OK", 200
+
+
+@app.route("/set_webhook", methods=["GET"])
+def set_webhook_route():
+    bot.remove_webhook()
+    time.sleep(0.5)
+    ok = bot.set_webhook(url=f"{RENDER_URL}/webhook")
+    return jsonify({"webhook_set": ok, "url": f"{RENDER_URL}/webhook"})
+
+
 @app.route("/")
 def home():
     return "Vitora Smart Pharm API ishlamoqda!"
@@ -369,11 +385,12 @@ def api_order():
     return jsonify({"ok": True, "order_id": order_id})
 
 
-def run_bot():
-    bot.infinity_polling(skip_pending=True)
-
-
 if __name__ == "__main__":
-    threading.Thread(target=run_bot, daemon=True).start()
+    try:
+        bot.remove_webhook()
+        time.sleep(0.5)
+        bot.set_webhook(url=f"{RENDER_URL}/webhook")
+    except Exception as e:
+        print("Webhook ulashda xato:", e)
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
