@@ -77,13 +77,18 @@ def init_db():
     conn.close()
 
 
-def find_col(df, keywords):
-    for col in df.columns:
-        c_low = str(col).strip().lower()
-        for kw in keywords:
-            if kw in c_low:
-                return col
-    return None
+def parse_number(val):
+    s = str(val).strip().lower()
+    if not s or s == "nan":
+        return 0
+    s = s.replace(" ", "").replace("\xa0", "").replace(",", ".").replace("сум", "").replace("сўм", "")
+    cleaned = re.sub(r"[^\d.]", "", s)
+    if not cleaned:
+        return 0
+    try:
+        return int(float(cleaned))
+    except Exception:
+        return 0
 
 
 def auto_seed_from_excel(force=False):
@@ -100,69 +105,30 @@ def auto_seed_from_excel(force=False):
             df = pd.read_excel(EXCEL_FILE)
             df.columns = [str(c).strip() for c in df.columns]
 
-            col_name = find_col(df, ["наимен", "товар", "препарат", "nomi", "name", "назван"])
-            col_cat = find_col(df, ["катег", "групп", "kategoriya", "category", "тип"])
-            col_price = find_col(df, ["цен", "narx", "price", "сумм", "стоим", "розм", "розн"])
-            col_stock = find_col(df, ["остат", "кол", "qoldiq", "stock", "наличи"])
-            col_desc = find_col(df, ["опис", "производ", "страна", "срок", "tavsif", "desc"])
-            col_img = find_col(df, ["фото", "картин", "rasm", "image", "img", "url"])
-
             for _, row in df.iterrows():
-                if col_name:
-                    name = str(row[col_name]).strip()
-                else:
-                    name = ""
-                    for val in row.values:
-                        s = str(val).strip()
-                        if s and s.lower() != "nan" and not s.replace(".", "").isdigit():
-                            name = s
-                            break
-
-                if not name or name.lower() == "nan" or name.isdigit():
+                vals = [str(v).strip() for v in row.values]
+                text_cols = [v for v in vals if v and v.lower() != "nan" and not v.replace(".", "").isdigit()]
+                if not text_cols:
                     continue
 
-                category = str(row[col_cat]).strip() if col_cat else "БАДы"
-                if not category or category.lower() == "nan":
-                    category = "БАДы"
+                name = text_cols[0]
+                if "jami" in name.lower() or "итого" in name.lower() or "всего" in name.lower():
+                    continue
 
+                category = text_cols[1] if len(text_cols) > 1 else "БАДы"
+                desc = " | ".join(text_cols[2:4]) if len(text_cols) > 2 else ""
+
+                # Oxirgi katta sonni narx sifatida olamiz (masalan 15000, 23500)
                 price = 0
-                if col_price:
-                    raw_p = str(row[col_price]).replace(" ", "").replace(",", ".").replace("сум", "").replace("сўм", "")
-                    try:
-                        price = int(float(re.sub(r"[^\d.]", "", raw_p)))
-                    except Exception:
-                        price = 0
-
-                stock = 10
-                if col_stock:
-                    raw_s = str(row[col_stock]).replace(" ", "").replace(",", ".")
-                    try:
-                        stock = int(float(re.sub(r"[^\d.]", "", raw_s)))
-                    except Exception:
-                        stock = 10
-
-                desc = ""
-                if col_desc:
-                    desc = str(row[col_desc]).strip()
-                    if desc.lower() == "nan":
-                        desc = ""
-                else:
-                    extra = []
-                    for c in df.columns:
-                        if c in (col_name, col_cat, col_price, col_stock, col_img):
-                            continue
-                        val = str(row[c]).strip()
-                        if val and val.lower() != "nan" and not val.isdigit() and len(val) > 2:
-                            extra.append(val)
-                    desc = " | ".join(extra[:2])
-
-                img = str(row[col_img]).strip() if col_img else ""
-                if img.lower() == "nan":
-                    img = ""
+                for v in reversed(vals):
+                    num = parse_number(v)
+                    if num >= 500:
+                        price = num
+                        break
 
                 cur.execute(
                     "INSERT INTO products (name, category, price, stock, description, image) VALUES (?, ?, ?, ?, ?, ?)",
-                    (name, category, price, stock, desc, img)
+                    (name, category, price, 10, desc, "")
                 )
             conn.commit()
         except Exception as e:
