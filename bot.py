@@ -1,8 +1,8 @@
 import os
-import json
 import base64
 import sqlite3
 import threading
+import time
 from flask import Flask, request, jsonify
 import telebot
 from telebot import types
@@ -10,8 +10,9 @@ from telebot import types
 TOKEN = "9250053752:AAHW1tI5OZAXio-fcbnIy-wF24yOxIEQGCk"
 ADMIN_ID = 5055854613
 WEBAPP_URL = "https://relaxed-meerkat-9b9fbb.netlify.app"
+RENDER_URL = "https://vitora-bot.onrender.com"
 
-bot = telebot.TeleBot(TOKEN)
+bot = telebot.TeleBot(TOKEN, threaded=False)
 app = Flask(__name__)
 admin_drafts = {}
 
@@ -288,21 +289,22 @@ def my_orders(message):
 def settings(message):
     bot.send_message(message.chat.id, "⚙️ Til: O'zbekcha\n🔔 Bildirishnomalar: Yoqilgan")
 
-# ================= MINI APP API =================
+# ================= WEBHOOK & MINI APP API =================
+@app.route("/webhook", methods=["POST"])
+def telegram_webhook():
+    json_str = request.get_data().decode("utf-8")
+    update = telebot.types.Update.de_json(json_str)
+    bot.process_new_updates([update])
+    return "OK", 200
+
 @app.route("/api/products", methods=["GET"])
 def api_products():
     cursor.execute("SELECT id, name, category, price, description, image_data FROM products ORDER BY id DESC")
     rows = cursor.fetchall()
-    items = []
-    for r in rows:
-        items.append({
-            "id": r[0],
-            "name": r[1],
-            "category": r[2],
-            "price": r[3],
-            "description": r[4],
-            "image": r[5]
-        })
+    items = [
+        {"id": r[0], "name": r[1], "category": r[2], "price": r[3], "description": r[4], "image": r[5]}
+        for r in rows
+    ]
     return jsonify({"ok": True, "products": items}), 200
 
 @app.route("/api/order", methods=["POST", "OPTIONS"])
@@ -333,12 +335,15 @@ def api_order():
 
 @app.route("/")
 def index():
-    return "Vitora Bot is running 24/7!"
+    return "Vitora Bot Webhook is running 24/7!"
 
-def run_bot():
-    bot.infinity_polling(skip_pending=True)
+def setup_webhook():
+    time.sleep(3)
+    bot.remove_webhook()
+    time.sleep(1)
+    bot.set_webhook(url=f"{RENDER_URL}/webhook")
 
 if __name__ == "__main__":
-    threading.Thread(target=run_bot, daemon=True).start()
+    threading.Thread(target=setup_webhook, daemon=True).start()
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
