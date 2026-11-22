@@ -2,13 +2,11 @@ import os
 import re
 import time
 import sqlite3
-import threading
 import pandas as pd
 import telebot
 from telebot import types
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from duckduckgo_search import DDGS
 
 # ================= SOZLAMALAR =================
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "9250053752:AAHW1tI5OZAXio-fcbnIy-wF24yOxIEQGCk")
@@ -22,7 +20,6 @@ HUMO_CARD = "9860 1501 1189 2918"
 bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 app = Flask(__name__)
 CORS(app)
-autofill_running = False
 
 
 # ================= MA'LUMOTLAR BAZASI =================
@@ -35,6 +32,14 @@ def get_db():
 def init_db():
     conn = get_db()
     cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY,
+            name TEXT,
+            username TEXT,
+            phone TEXT
+        )
+    """)
     cur.execute("""
         CREATE TABLE IF NOT EXISTS products (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -80,8 +85,6 @@ def auto_seed_from_excel(force=False):
     cur = conn.cursor()
     cur.execute("SELECT COUNT(*) FROM products")
     count = cur.fetchone()[0]
-
-    # Agar baza bo'sh bo'lsa YOKI oldin xato yuklanib narxlar 0 bo'lib qolgan bo'lsa
     cur.execute("SELECT COUNT(*) FROM products WHERE price > 0")
     valid_prices = cur.fetchone()[0]
 
@@ -98,12 +101,10 @@ def auto_seed_from_excel(force=False):
             col_desc = find_col(df, ["опис", "производ", "страна", "срок", "tavsif", "desc"])
             col_img = find_col(df, ["фото", "картин", "rasm", "image", "img", "url"])
 
-            added = 0
             for _, row in df.iterrows():
                 if col_name:
                     name = str(row[col_name]).strip()
                 else:
-                    # Raqam bo'lmagan birinchi matnli ustunni olamiz
                     name = ""
                     for val in row.values:
                         s = str(val).strip()
@@ -140,7 +141,6 @@ def auto_seed_from_excel(force=False):
                     if desc.lower() == "nan":
                         desc = ""
                 else:
-                    # Qolgan matnli ustunlardan qisqa tavsif yig'amiz (ishlab chiqaruvchi, srok)
                     extra = []
                     for c in df.columns:
                         if c in (col_name, col_cat, col_price, col_stock, col_img):
@@ -158,9 +158,7 @@ def auto_seed_from_excel(force=False):
                     "INSERT INTO products (name, category, price, stock, description, image) VALUES (?, ?, ?, ?, ?, ?)",
                     (name, category, price, stock, desc, img)
                 )
-                added += 1
             conn.commit()
-            print(f"Excel fayldan {added} ta mahsulot to'g'ri yuklandi.")
         except Exception as e:
             print("Excel yuklashda xatolik:", e)
     conn.close()
@@ -170,84 +168,65 @@ init_db()
 auto_seed_from_excel()
 
 
-# ================= INTERNETDAN RASM QIDIRISH =================
-def clean_query_name(name):
-    q = re.sub(r"\(.*?\)", "", name)
-    q = q.replace("№", " ").replace(",", " ")
-    q = " ".join(q.split()[:5])
-    return f"{q} упаковка"
-
-
-def search_product_image(name):
-    query = clean_query_name(name)
-    try:
-        with DDGS() as ddgs:
-            results = list(ddgs.images(query, max_results=3))
-            for r in results:
-                img_url = r.get("image", "")
-                if img_url.startswith("http") and any(ext in img_url.lower() for ext in [".jpg", ".jpeg", ".png", ".webp"]):
-                    return img_url
-            if results:
-                return results[0].get("image", "")
-    except Exception as e:
-        print(f"Rasm qidirish xatosi ({name}):", e)
-    return ""
-
-
-def background_autofill(chat_id):
-    global autofill_running
-    autofill_running = True
-    conn = get_db()
-    rows = conn.execute("SELECT id, name FROM products WHERE image IS NULL OR image = '' ORDER BY id DESC").fetchall()
-    conn.close()
-
-    total = len(rows)
-    found = 0
-    bot.send_message(chat_id, f"🔍 <b>{total} ta</b> mahsulot uchun internetdan original rasm qidirish boshlandi...\nHar 50 tadan keyin hisobot beraman.", parse_mode="HTML")
-
-    for idx, r in enumerate(rows, start=1):
-        img_url = search_product_image(r["name"])
-        if img_url:
-            conn = get_db()
-            conn.execute("UPDATE products SET image = ? WHERE id = ?", (img_url, r["id"]))
-            conn.commit()
-            conn.close()
-            found += 1
-
-        if idx % 50 == 0:
-            bot.send_message(chat_id, f"⏳ Jarayon: <b>{idx}/{total}</b> tekshirildi (<b>{found} ta</b> rasm topildi).", parse_mode="HTML")
-        time.sleep(1.2)
-
-    autofill_running = False
-    bot.send_message(chat_id, f"✅ <b>Yakunlandi!</b>\nJami tekshirildi: {total} ta\n🖼 Original rasm topildi: <b>{found} ta</b>.", parse_mode="HTML")
-
-
 # ================= TELEGRAM BOT BUYRUQLARI =================
+def shop_keyboard():
+    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add(types.KeyboardButton(text="🛍 Do'konni ochish", web_app=types.WebAppInfo(url=WEBAPP_URL)))
+    return kb
+
+
 @bot.message_handler(commands=["start"])
 def cmd_start(message):
-    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    btn_shop = types.KeyboardButton(
-        text="🛍 Do'konni ochish",
-        web_app=types.WebAppInfo(url=WEBAPP_URL)
-    )
-    kb.add(btn_shop)
+    conn = get_db()
+    user = conn.execute("SELECT phone FROM users WHERE user_id = ?", (message.from_user.id,)).fetchone()
+    conn.close()
 
-    text = (
-        f"Assalomu alaykum, <b>{message.from_user.first_name}</b>!\n\n"
-        "🏥 <b>Vitora | Smart Pharm</b> dorixonasi botiga xush kelibsiz.\n"
-        "Kerakli dori va BAD mahsulotlarini onlayn buyurtma qilish uchun pastdagi tugmani bosing 👇"
-    )
-    bot.send_message(message.chat.id, text, parse_mode="HTML", reply_markup=kb)
+    if user and user["phone"]:
+        bot.send_message(
+            message.chat.id,
+            f"Assalomu alaykum, <b>{message.from_user.first_name}</b>!\n\n"
+            "🏥 <b>Vitora | Smart Pharm</b> dorixonasiga xush kelibsiz.\n"
+            "Buyurtma berish uchun pastdagi tugmani bosing 👇",
+            parse_mode="HTML",
+            reply_markup=shop_keyboard()
+        )
+    else:
+        kb = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+        kb.add(types.KeyboardButton(text="📱 Telefon raqamni yuborish", request_contact=True))
+        bot.send_message(
+            message.chat.id,
+            f"Assalomu alaykum, <b>{message.from_user.first_name}</b>!\n\n"
+            "🏥 <b>Vitora | Smart Pharm</b> dorixonasi botiga xush kelibsiz.\n"
+            "Ro'yxatdan o'tish va bonus kartangizni faollashtirish uchun telefon raqamingizni yuboring 👇",
+            parse_mode="HTML",
+            reply_markup=kb
+        )
 
 
-@bot.message_handler(commands=["autofill_photos"])
-def cmd_autofill_photos(message):
-    if message.from_user.id != ADMIN_ID:
+@bot.message_handler(content_types=["contact"])
+def handle_contact(message):
+    if not message.contact:
         return
-    if autofill_running:
-        bot.reply_to(message, "⏳ Rasm qidirish jarayoni allaqachon ketmoqda, biroz kuting.")
-        return
-    threading.Thread(target=background_autofill, args=(message.chat.id,), daemon=True).start()
+    phone = message.contact.phone_number
+    if not phone.startswith("+"):
+        phone = "+" + phone
+
+    conn = get_db()
+    conn.execute(
+        "INSERT OR REPLACE INTO users (user_id, name, username, phone) VALUES (?, ?, ?, ?)",
+        (message.from_user.id, message.from_user.first_name, message.from_user.username or "", phone)
+    )
+    conn.commit()
+    conn.close()
+
+    bot.send_message(
+        message.chat.id,
+        f"✅ Raqamingiz tasdiqlandi: <b>{phone}</b>\n"
+        "🎁 Sizga <b>5 000 so'm</b> bonus berildi!\n\n"
+        "Endi do'konni ochishingiz mumkin 👇",
+        parse_mode="HTML",
+        reply_markup=shop_keyboard()
+    )
 
 
 @bot.message_handler(commands=["products"])
