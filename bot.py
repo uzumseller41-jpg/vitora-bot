@@ -1,4 +1,6 @@
 import os
+import re
+import time
 import sqlite3
 import threading
 import pandas as pd
@@ -6,6 +8,7 @@ import telebot
 from telebot import types
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from duckduckgo_search import DDGS
 
 # ================= SOZLAMALAR =================
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "9250053752:AAH-YourTokenHere")
@@ -18,6 +21,7 @@ HUMO_CARD = "9860 1501 1189 2918"
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
 CORS(app)
+autofill_running = False
 
 
 # ================= MA'LUMOTLAR BAZASI =================
@@ -116,6 +120,59 @@ init_db()
 auto_seed_from_excel()
 
 
+# ================= INTERNETDAN RASM QIDIRISH =================
+def clean_query_name(name):
+    # Qavs ichidagi zavod nomlarini tozalab aniq qidiruv so'zi yasash
+    q = re.sub(r"\(.*?\)", "", name)
+    q = q.replace("№", " ").replace(",", " ")
+    q = " ".join(q.split()[:5])
+    return f"{q} упаковка"
+
+
+def search_product_image(name):
+    query = clean_query_name(name)
+    try:
+        with DDGS() as ddgs:
+            results = list(ddgs.images(query, max_results=3))
+            for r in results:
+                img_url = r.get("image", "")
+                if img_url.startswith("http") and any(ext in img_url.lower() for ext in [".jpg", ".jpeg", ".png", ".webp"]):
+                    return img_url
+            if results:
+                return results[0].get("image", "")
+    except Exception as e:
+        print(f"Rasm qidirish xatosi ({name}):", e)
+    return ""
+
+
+def background_autofill(chat_id):
+    global autofill_running
+    autofill_running = True
+    conn = get_db()
+    rows = conn.execute("SELECT id, name FROM products WHERE image IS NULL OR image = '' ORDER BY id DESC").fetchall()
+    conn.close()
+
+    total = len(rows)
+    found = 0
+    bot.send_message(chat_id, f"🔍 <b>{total} ta</b> mahsulot uchun internetdan original rasm qidirish boshlandi...\nHar 50 tadan keyin hisobot beraman.", parse_mode="HTML")
+
+    for idx, r in enumerate(rows, start=1):
+        img_url = search_product_image(r["name"])
+        if img_url:
+            conn = get_db()
+            conn.execute("UPDATE products SET image = ? WHERE id = ?", (img_url, r["id"]))
+            conn.commit()
+            conn.close()
+            found += 1
+
+        if idx % 50 == 0:
+            bot.send_message(chat_id, f"⏳ Jarayon: <b>{idx}/{total}</b> tekshirildi (<b>{found} ta</b> rasm topildi).", parse_mode="HTML")
+        time.sleep(1.2)
+
+    autofill_running = False
+    bot.send_message(chat_id, f"✅ <b>Yakunlandi!</b>\nJami tekshirildi: {total} ta\n🖼 Original rasm topildi: <b>{found} ta</b>.", parse_mode="HTML")
+
+
 # ================= TELEGRAM BOT BUYRUQLARI =================
 @bot.message_handler(commands=["start"])
 def cmd_start(message):
@@ -132,6 +189,16 @@ def cmd_start(message):
         "Kerakli dori va BAD mahsulotlarini onlayn buyurtma qilish uchun pastdagi tugmani bosing 👇"
     )
     bot.send_message(message.chat.id, text, parse_mode="HTML", reply_markup=kb)
+
+
+@bot.message_handler(commands=["autofill_photos"])
+def cmd_autofill_photos(message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    if autofill_running:
+        bot.reply_to(message, "⏳ Rasm qidirish jarayoni allaqachon ketmoqda, biroz kuting.")
+        return
+    threading.Thread(target=background_autofill, args=(message.chat.id,), daemon=True).start()
 
 
 @bot.message_handler(commands=["products"])
