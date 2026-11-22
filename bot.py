@@ -1,8 +1,10 @@
 import os
+import io
 import base64
 import sqlite3
 import threading
 import time
+import openpyxl
 from flask import Flask, request, jsonify
 import telebot
 from telebot import types
@@ -11,10 +13,12 @@ TOKEN = "9250053752:AAHW1tI5OZAXio-fcbnIy-wF24yOxIEQGCk"
 ADMIN_ID = 5055854613
 WEBAPP_URL = "https://relaxed-meerkat-9b9fbb.netlify.app"
 RENDER_URL = "https://vitora-bot.onrender.com"
+PAYMENT_CARD = "9860 1501 1189 2918"
 
 bot = telebot.TeleBot(TOKEN, threaded=False)
 app = Flask(__name__)
 admin_drafts = {}
+pending_photo_pid = {}
 
 @app.after_request
 def add_cors_headers(response):
@@ -43,11 +47,18 @@ CREATE TABLE IF NOT EXISTS products (
     name TEXT NOT NULL,
     category TEXT DEFAULT 'Витамины',
     price INTEGER NOT NULL,
+    stock INTEGER DEFAULT 0,
     description TEXT DEFAULT '',
     image_data TEXT DEFAULT ''
 )
 """)
 conn.commit()
+
+try:
+    cursor.execute("ALTER TABLE products ADD COLUMN stock INTEGER DEFAULT 0")
+    conn.commit()
+except Exception:
+    pass
 
 def get_card_id(user_id: int) -> str:
     return "VTR-" + hex(abs(user_id))[2:].upper().zfill(8)[:8]
@@ -65,7 +76,77 @@ def main_menu():
     )
     return kb
 
-# ================= ADMIN BUYRUQLARI =================
+# ================= EXCEL (.XLSX) ORQALI TOVAR YUKLASH =================
+@bot.message_handler(content_types=["document"], func=lambda m: m.from_user.id == ADMIN_ID)
+def admin_upload_excel(message):
+    doc = message.document
+    if not doc.file_name.lower().endswith(".xlsx"):
+        bot.send_message(message.chat.id, "⚠️ Iltimos, faqat <b>.xlsx</b> formatidagi Excel fayl yuboring.", parse_mode="HTML")
+        return
+
+    file_info = bot.get_file(doc.file_id)
+    downloaded = bot.download_file(file_info.file_path)
+    wb = openpyxl.load_workbook(io.BytesIO(downloaded), data_only=True)
+    ws = wb["Tovarlar"] if "Tovarlar" in wb.sheetnames else wb.active
+
+    added_count = 0
+    for row in ws.iter_rows(min_row=5, values_only=True):
+        if not row or len(row) < 4:
+            continue
+        name = str(row[1] or "").strip()
+        if not name or name.startswith("JAMI"):
+            continue
+        category = str(row[2] or "Витамины").strip()
+        try:
+            price = int(float(row[3] or 0))
+        except Exception:
+            price = 0
+        try:
+            stock = int(float(row[4] or 0)) if len(row) > 4 and row[4] is not None else 0
+        except Exception:
+            stock = 0
+        description = str(row[6] or "").strip() if len(row) > 6 else ""
+        image_url = str(row[7] or "").strip() if len(row) > 7 else ""
+
+        if price > 0:
+            cursor.execute(
+                "INSERT INTO products (name, category, price, stock, description, image_data) VALUES (?, ?, ?, ?, ?, ?)",
+                (name, category, price, stock, description, image_url)
+            )
+            added_count += 1
+
+    conn.commit()
+    bot.send_message(
+        message.chat.id,
+        f"📊 <b>Excel fayl muvaffaqiyatli yuklandi!</b>\n\n"
+        f"✅ Qo‘shilgan tovarlar soni: <b>{added_count} ta</b>\n\n"
+        f"📋 Barchasini ko‘rish: <code>/products</code>\n"
+        f"🖼 Biror tovarga rasm biriktirish uchun: <code>/photo ID</code> (masalan: <code>/photo 1</code>)",
+        parse_mode="HTML"
+    )
+
+@bot.message_handler(commands=["photo"])
+def admin_attach_photo_cmd(message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    parts = message.text.split()
+    if len(parts) < 2 or not parts[1].isdigit():
+        bot.send_message(message.chat.id, "⚠️ To‘g‘ri format: <code>/photo 1</code> (ID raqamini yozing)", parse_mode="HTML")
+        return
+    pid = int(parts[1])
+    cursor.execute("SELECT name FROM products WHERE id = ?", (pid,))
+    row = cursor.fetchone()
+    if not row:
+        bot.send_message(message.chat.id, "⚠️ Bunday ID raqamli tovar topilmadi.")
+        return
+    pending_photo_pid[ADMIN_ID] = pid
+    bot.send_message(
+        message.chat.id,
+        f"📸 <b>{row[0]}</b> (ID: <code>{pid}</code>) uchun rasm yuboring:",
+        parse_mode="HTML"
+    )
+
+# ================= YAKKA TARTIBDA ADMIN BUYRUQLARI =================
 @bot.message_handler(commands=["add"])
 def admin_add_start(message):
     if message.from_user.id != ADMIN_ID:
@@ -75,7 +156,7 @@ def admin_add_start(message):
     kb.add(types.KeyboardButton("⏭ Rasmsiz davom etish"), types.KeyboardButton("❌ Bekor qilish"))
     bot.send_message(
         message.chat.id,
-        "📸 <b>1/5-qadam:</b> Tovar rasmini yuboring (yoki «Rasmsiz davom etish» tugmasini bosing):",
+        "📸 <b>1/6-qadam:</b> Tovar rasmini yuboring (yoki «Rasmsiz davom etish» tugmasini bosing):",
         parse_mode="HTML",
         reply_markup=kb
     )
@@ -84,16 +165,37 @@ def admin_add_start(message):
 def admin_list_products(message):
     if message.from_user.id != ADMIN_ID:
         return
-    cursor.execute("SELECT id, name, price, category FROM products ORDER BY id DESC")
+    cursor.execute("SELECT id, name, price, stock, category FROM products ORDER BY id DESC")
     rows = cursor.fetchall()
     if not rows:
-        bot.send_message(message.chat.id, "📭 Hozircha bazada qo‘shilgan tovarlar yo‘q. Qo‘shish uchun /add yozing.")
+        bot.send_message(message.chat.id, "📭 Hozircha bazada qo‘shilgan tovarlar yo‘q. Excel (.xlsx) yuboring yoki /add yozing.")
         return
-    lines = ["📦 <b>Do‘kondagi tovarlar ro‘yxati:</b>\n"]
-    for r in rows:
-        lines.append(f"🆔 <code>{r[0]}</code> | <b>{r[1]}</b> ({r[3]}) — {r[2]:,} so‘m")
-    lines.append("\n🗑 O‘chirish uchun: <code>/del ID</code> (masalan: <code>/del 1</code>)")
+    lines = ["📦 <b>Do‘kondagi tovarlar va qoldiqlar:</b>\n"]
+    for r in rows[:50]:
+        lines.append(f"🆔 <code>{r[0]}</code> | <b>{r[1]}</b> ({r[4]})\n    💰 {r[2]:,} so‘m | 📦 Qoldiq: <b>{r[3]} dona</b>")
+    if len(rows) > 50:
+        lines.append(f"\n... va yana {len(rows) - 50} ta tovar")
+    lines.append("\n🖼 Rasm qo‘shish: <code>/photo ID</code>\n➕ Qoldiq qo‘shish: <code>/stock ID SON</code>\n🗑 O‘chirish: <code>/del ID</code>")
     bot.send_message(message.chat.id, "\n".join(lines), parse_mode="HTML")
+
+@bot.message_handler(commands=["stock"])
+def admin_update_stock(message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    parts = message.text.split()
+    if len(parts) < 3 or not parts[1].isdigit() or not parts[2].lstrip("+-").isdigit():
+        bot.send_message(message.chat.id, "⚠️ To‘g‘ri format: <code>/stock 1 25</code>", parse_mode="HTML")
+        return
+    pid = int(parts[1])
+    qty = int(parts[2])
+    cursor.execute("UPDATE products SET stock = MAX(0, stock + ?) WHERE id = ?", (qty, pid))
+    conn.commit()
+    cursor.execute("SELECT name, stock FROM products WHERE id = ?", (pid,))
+    row = cursor.fetchone()
+    if row:
+        bot.send_message(message.chat.id, f"✅ <b>{row[0]}</b> yangi qoldig‘i: <b>{row[1]} dona</b>", parse_mode="HTML")
+    else:
+        bot.send_message(message.chat.id, "⚠️ Bunday ID topilmadi.")
 
 @bot.message_handler(commands=["del"])
 def admin_delete_product(message):
@@ -108,23 +210,30 @@ def admin_delete_product(message):
     conn.commit()
     bot.send_message(message.chat.id, f"🗑 ID <code>{pid}</code> raqamli tovar o‘chirildi.", parse_mode="HTML")
 
-@bot.message_handler(content_types=["photo"], func=lambda m: m.from_user.id == ADMIN_ID and ADMIN_ID in admin_drafts)
+@bot.message_handler(content_types=["photo"], func=lambda m: m.from_user.id == ADMIN_ID)
 def admin_receive_photo(message):
-    draft = admin_drafts[ADMIN_ID]
-    if draft.get("step") != "photo":
-        return
     file_id = message.photo[-1].file_id
     file_info = bot.get_file(file_id)
     downloaded = bot.download_file(file_info.file_path)
     b64_img = "data:image/jpeg;base64," + base64.b64encode(downloaded).decode("utf-8")
-    draft["image_data"] = b64_img
-    draft["step"] = "name"
-    bot.send_message(
-        message.chat.id,
-        "✅ Rasm qabul qilindi!\n\n✍️ <b>2/5-qadam:</b> Tovar nomini yozing (masalan: <i>Витамин D3 5000 МЕ</i>):",
-        parse_mode="HTML",
-        reply_markup=types.ReplyKeyboardRemove()
-    )
+
+    if ADMIN_ID in pending_photo_pid:
+        pid = pending_photo_pid.pop(ADMIN_ID)
+        cursor.execute("UPDATE products SET image_data = ? WHERE id = ?", (b64_img, pid))
+        conn.commit()
+        bot.send_message(message.chat.id, f"✅ ID <code>{pid}</code> raqamli tovarga rasm muvaffaqiyatli biriktirildi!", parse_mode="HTML")
+        return
+
+    if ADMIN_ID in admin_drafts and admin_drafts[ADMIN_ID].get("step") == "photo":
+        draft = admin_drafts[ADMIN_ID]
+        draft["image_data"] = b64_img
+        draft["step"] = "name"
+        bot.send_message(
+            message.chat.id,
+            "✅ Rasm qabul qilindi!\n\n✍️ <b>2/6-qadam:</b> Tovar nomini yozing:",
+            parse_mode="HTML",
+            reply_markup=types.ReplyKeyboardRemove()
+        )
 
 @bot.message_handler(func=lambda m: m.from_user.id == ADMIN_ID and ADMIN_ID in admin_drafts)
 def admin_receive_steps(message):
@@ -142,7 +251,7 @@ def admin_receive_steps(message):
         draft["step"] = "name"
         bot.send_message(
             message.chat.id,
-            "✍️ <b>2/5-qadam:</b> Tovar nomini yozing:",
+            "✍️ <b>2/6-qadam:</b> Tovar nomini yozing:",
             parse_mode="HTML",
             reply_markup=types.ReplyKeyboardRemove()
         )
@@ -150,10 +259,10 @@ def admin_receive_steps(message):
         draft["name"] = text
         draft["step"] = "category"
         kb = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True, row_width=2)
-        kb.add("Витамины", "Омега-3", "Минералы", "Иммунитет", "Для детей", "БАДы")
+        kb.add("Витамины и комплексы", "Омега-3 и рыбий жир", "Минералы и микроэлементы", "Для детей", "Для суставов и костей", "Фиточаи, травы и экстракты")
         bot.send_message(
             message.chat.id,
-            "📂 <b>3/5-qadam:</b> Kategoriyani tanlang yoki yozing:",
+            "📂 <b>3/6-qadam:</b> Kategoriyani tanlang yoki yozing:",
             parse_mode="HTML",
             reply_markup=kb
         )
@@ -162,40 +271,46 @@ def admin_receive_steps(message):
         draft["step"] = "price"
         bot.send_message(
             message.chat.id,
-            "💰 <b>4/5-qadam:</b> Narxini faqat raqamda yozing (masalan: <code>145000</code>):",
+            "💰 <b>4/6-qadam:</b> Sotuv narxini faqat raqamda yozing (masalan: <code>145000</code>):",
             parse_mode="HTML",
             reply_markup=types.ReplyKeyboardRemove()
         )
     elif step == "price":
         digits = "".join(c for c in text if c.isdigit())
         if not digits:
-            bot.send_message(message.chat.id, "⚠️ Iltimos, narxni faqat raqamda yozing (masalan: 145000):")
+            bot.send_message(message.chat.id, "⚠️ Iltimos, narxni faqat raqamda yozing:")
             return
         draft["price"] = int(digits)
+        draft["step"] = "stock"
+        bot.send_message(
+            message.chat.id,
+            "📦 <b>5/6-qadam:</b> Omborga nechta keldi? (sonini yozing, masalan: <code>30</code>):",
+            parse_mode="HTML"
+        )
+    elif step == "stock":
+        digits = "".join(c for c in text if c.isdigit())
+        if not digits:
+            bot.send_message(message.chat.id, "⚠️ Iltimos, kelgan sonini faqat raqamda yozing:")
+            return
+        draft["stock"] = int(digits)
         draft["step"] = "description"
         bot.send_message(
             message.chat.id,
-            "📝 <b>5/5-qadam:</b> Qisqa tavsif / tarkibini yozing (masalan: <i>60 капсул, для костей и иммунитета</i>):",
+            "📝 <b>6/6-qadam:</b> Qisqa tavsif / tarkibini yozing:",
             parse_mode="HTML"
         )
     elif step == "description":
         draft["description"] = text
         cursor.execute(
-            "INSERT INTO products (name, category, price, description, image_data) VALUES (?, ?, ?, ?, ?)",
-            (draft["name"], draft["category"], draft["price"], draft["description"], draft.get("image_data", ""))
+            "INSERT INTO products (name, category, price, stock, description, image_data) VALUES (?, ?, ?, ?, ?, ?)",
+            (draft["name"], draft["category"], draft["price"], draft["stock"], draft["description"], draft.get("image_data", ""))
         )
         conn.commit()
         new_id = cursor.lastrowid
         admin_drafts.pop(ADMIN_ID, None)
         bot.send_message(
             message.chat.id,
-            f"🎉 <b>Tovar muvaffaqiyatli qo‘shildi!</b>\n\n"
-            f"🆔 ID: <code>{new_id}</code>\n"
-            f"💊 Nomi: <b>{draft['name']}</b>\n"
-            f"📂 Kategoriya: {draft['category']}\n"
-            f"💰 Narxi: <b>{draft['price']:,} so‘m</b>\n"
-            f"📝 Tavsif: {draft['description']}\n\n"
-            f"Endi Mini App’da darhol ko‘rinadi!",
+            f"🎉 <b>Tovar qo‘shildi!</b>\n🆔 ID: <code>{new_id}</code> | <b>{draft['name']}</b> — {draft['price']:,} so‘m ({draft['stock']} dona)",
             parse_mode="HTML",
             reply_markup=main_menu()
         )
@@ -297,15 +412,19 @@ def telegram_webhook():
     bot.process_new_updates([update])
     return "OK", 200
 
+@app.route("/api/config", methods=["GET"])
+def api_config():
+    return jsonify({"ok": True, "payment_card": PAYMENT_CARD}), 200
+
 @app.route("/api/products", methods=["GET"])
 def api_products():
-    cursor.execute("SELECT id, name, category, price, description, image_data FROM products ORDER BY id DESC")
+    cursor.execute("SELECT id, name, category, price, stock, description, image_data FROM products ORDER BY id DESC")
     rows = cursor.fetchall()
     items = [
-        {"id": r[0], "name": r[1], "category": r[2], "price": r[3], "description": r[4], "image": r[5]}
+        {"id": r[0], "name": r[1], "category": r[2], "price": r[3], "stock": r[4], "description": r[5], "image": r[6]}
         for r in rows
     ]
-    return jsonify({"ok": True, "products": items}), 200
+    return jsonify({"ok": True, "products": items, "payment_card": PAYMENT_CARD}), 200
 
 @app.route("/api/order", methods=["POST", "OPTIONS"])
 def api_order():
@@ -324,20 +443,31 @@ def api_order():
 
     delivery_type = data.get("delivery_type", "Yetkazib berish")
     address = (data.get("address") or "").strip() or "Dorixonadan olib ketish"
+    payment_method = data.get("payment_method", "Naqd pul")
+
+    cart_items = data.get("cart", [])
+    if isinstance(cart_items, list):
+        for item in cart_items:
+            pid = item.get("id")
+            qty = int(item.get("qty", 1))
+            if pid:
+                cursor.execute("UPDATE products SET stock = MAX(0, stock - ?) WHERE id = ?", (qty, int(pid)))
+        conn.commit()
 
     text = (
         f"🆕 <b>YANGI BUYURTMA!</b>\n\n"
         f"👤 Mijoz: <b>{data.get('name', 'Mijoz')}</b> (@{data.get('username', 'yoq')})\n"
         f"📞 Tel: <code>{phone}</code>\n"
+        f"💳 To‘lov: <b>{payment_method}</b> (Karta: <code>{PAYMENT_CARD}</code>)\n"
         f"🚚 Usul: <b>{delivery_type}</b>\n"
         f"📍 Manzil: <i>{address}</i>\n"
-        f"💳 Karta: <code>{data.get('card', '—')}</code>\n\n"
+        f"🆔 Karta ID: <code>{data.get('card', '—')}</code>\n\n"
         f"💊 <b>Mahsulotlar:</b>\n{data.get('items', '')}\n\n"
         f"💰 <b>Jami: {int(data.get('total', 0)):,} so'm</b>"
     )
     try:
         bot.send_message(ADMIN_ID, text, parse_mode="HTML")
-        return jsonify({"ok": True}), 200
+        return jsonify({"ok": True, "payment_card": PAYMENT_CARD}), 200
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
