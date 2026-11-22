@@ -11,7 +11,7 @@ from flask_cors import CORS
 from duckduckgo_search import DDGS
 
 # ================= SOZLAMALAR =================
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "9250053752:AAH-YourTokenHere")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "9250053752:AAHW1tI5OZAXio-fcbnIy-wF24yOxIEQGCk")
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "5055854613"))
 WEBAPP_URL = "https://uzumseller41-jpg.github.io/vitora-shop/?v=2"
 EXCEL_FILE = "Vitora_Smart_Pharm_BAD_Tovarlar.xlsx"
