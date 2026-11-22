@@ -1,487 +1,478 @@
-import os
-import io
-import base64
-import sqlite3
-import threading
-import time
-import openpyxl
-from flask import Flask, request, jsonify
-import telebot
-from telebot import types
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Vitora | Smart Pharm</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background: #0b1120; color: #f8fafc; padding-bottom: 84px; }
+    .container { max-width: 520px; margin: 0 auto; padding: 16px; }
+    .greeting { font-size: 13px; color: #94a3b8; }
+    .username { font-size: 22px; font-weight: 800; text-transform: uppercase; margin: 2px 0 14px; }
+    .bonus-card {
+      background: linear-gradient(135deg, #1d4ed8, #2563eb 60%, #3b82f6);
+      border-radius: 18px; padding: 18px 20px; margin-bottom: 18px;
+      box-shadow: 0 10px 25px rgba(37, 99, 235, 0.35);
+    }
+    .bonus-label { font-size: 11px; letter-spacing: 1px; opacity: 0.85; font-weight: 700; }
+    .bonus-val { font-size: 32px; font-weight: 800; margin: 4px 0 2px; }
+    .bonus-sub { font-size: 13px; opacity: 0.9; display: flex; justify-content: space-between; }
+    .search-box {
+      width: 100%; background: #1e293b; border: 1px solid #334155; color: #fff;
+      padding: 12px 14px; border-radius: 12px; font-size: 14px; margin-bottom: 12px; outline: none;
+    }
+    .cats { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 10px; margin-bottom: 12px; scrollbar-width: none; }
+    .cats::-webkit-scrollbar { display: none; }
+    .cat-btn {
+      background: #1e293b; color: #cbd5e1; border: 1px solid #334155;
+      padding: 7px 13px; border-radius: 20px; font-size: 12px; white-space: nowrap; cursor: pointer;
+    }
+    .cat-btn.active { background: #2563eb; color: #fff; border-color: #2563eb; font-weight: 600; }
+    .section-title { font-size: 17px; font-weight: 700; margin-bottom: 12px; }
+    .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+    .card {
+      background: #111827; border: 1px solid #1e293b; border-radius: 16px;
+      padding: 12px; display: flex; flex-direction: column; justify-content: space-between;
+    }
+    .img-wrap {
+      background: #fff; border-radius: 12px; height: 110px; display: flex;
+      align-items: center; justify-content: center; position: relative; margin-bottom: 10px; overflow: hidden;
+    }
+    .img-wrap img { max-height: 95%; max-width: 95%; object-fit: contain; }
+    .badge-id {
+      position: absolute; top: 6px; left: 6px; background: #0f172a; color: #fff;
+      font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 8px; z-index: 2;
+    }
+    .p-name { font-size: 12px; font-weight: 700; line-height: 1.35; margin-bottom: 4px; color: #f1f5f9; }
+    .p-cat { font-size: 11px; color: #60a5fa; margin-bottom: 4px; }
+    .p-desc { font-size: 10px; color: #94a3b8; line-height: 1.3; margin-bottom: 6px; }
+    .p-stock { font-size: 11px; color: #34d399; margin-bottom: 8px; font-weight: 600; }
+    .p-stock.out { color: #f87171; }
+    .card-bottom { display: flex; align-items: center; justify-content: space-between; margin-top: auto; }
+    .p-price { font-size: 13px; font-weight: 800; color: #fff; }
+    .add-btn {
+      background: #2563eb; color: #fff; border: none; width: 30px; height: 30px;
+      border-radius: 10px; font-size: 18px; font-weight: 700; cursor: pointer;
+    }
+    .add-btn:disabled { background: #334155; cursor: not-allowed; }
+    .qty-ctrl { display: flex; align-items: center; gap: 6px; background: #1e293b; border-radius: 10px; padding: 3px 6px; }
+    .qty-ctrl button { background: none; border: none; color: #fff; font-size: 16px; font-weight: 700; width: 20px; cursor: pointer; }
+    .cart-item {
+      background: #111827; border: 1px solid #1e293b; border-radius: 14px;
+      padding: 12px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; gap: 10px;
+    }
+    .total-row {
+      display: flex; justify-content: space-between; font-size: 18px; font-weight: 800;
+      padding: 14px 0; border-top: 1px solid #1e293b; margin-top: 8px;
+    }
+    .form-box { background: #111827; border: 1px solid #1e293b; border-radius: 16px; padding: 14px; margin-top: 10px; }
+    .form-title { font-size: 15px; font-weight: 700; margin-bottom: 12px; }
+    label { display: block; font-size: 12px; color: #94a3b8; margin: 10px 0 5px; }
+    input, select {
+      width: 100%; background: #0f172a; border: 1px solid #334155; color: #fff;
+      padding: 11px 12px; border-radius: 10px; font-size: 14px; outline: none;
+    }
+    .card-pay-box {
+      display: none; background: #172554; border: 1px solid #2563eb;
+      border-radius: 12px; padding: 12px; margin-top: 10px;
+    }
+    .card-num-row { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
+    .card-digits { font-size: 15px; font-weight: 800; letter-spacing: 0.5px; color: #93c5fd; }
+    .copy-btn {
+      background: #2563eb; color: #fff; border: none; padding: 6px 12px;
+      border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer;
+    }
+    .submit-btn {
+      width: 100%; background: #2563eb; color: #fff; border: none; padding: 14px;
+      border-radius: 12px; font-size: 15px; font-weight: 700; margin-top: 16px; cursor: pointer;
+    }
+    .submit-btn:disabled { opacity: 0.6; }
+    .bottom-nav {
+      position: fixed; bottom: 0; left: 0; right: 0; background: #0f172a;
+      border-top: 1px solid #1e293b; display: flex; justify-content: space-around; padding: 8px 0 12px; z-index: 50;
+    }
+    .nav-item {
+      background: none; border: none; color: #64748b; font-size: 11px;
+      display: flex; flex-direction: column; align-items: center; gap: 3px; cursor: pointer; position: relative;
+    }
+    .nav-item.active { color: #3b82f6; font-weight: 700; }
+    .nav-icon { font-size: 20px; }
+    .cart-badge {
+      position: absolute; top: -2px; right: -8px; background: #ef4444; color: #fff;
+      font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 10px;
+    }
+    .tab-page { display: none; }
+    .tab-page.active { display: block; }
+    .info-card { background: #111827; border: 1px solid #1e293b; border-radius: 14px; padding: 14px; margin-bottom: 10px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- TAB 1: ASOSIY -->
+    <div id="tab-home" class="tab-page active">
+      <div class="greeting">Хайрли кун</div>
+      <div class="username" id="userName">МИЖОЗ</div>
+      <div class="bonus-card">
+        <div class="bonus-label">БОНУС</div>
+        <div class="bonus-val">5 000 <span style="font-size:16px;font-weight:500;">сўм</span></div>
+        <div class="bonus-sub">
+          <span id="userCardId">ID: VTR-00000001</span>
+          <span>Даража: Бронза</span>
+        </div>
+      </div>
+      <input type="text" id="searchHome" class="search-box" placeholder="🔍 Дори ёки БАД номини излаш..." oninput="renderProducts()" />
+      <div class="section-title">Оммабоп маҳсулотлар</div>
+      <div id="homeGrid" class="grid">Юкланмоқда...</div>
+    </div>
 
-TOKEN = "9250053752:AAHW1tI5OZAXio-fcbnIy-wF24yOxIEQGCk"
-ADMIN_ID = 5055854613
-WEBAPP_URL = "https://uzumseller41-jpg.github.io/vitora-shop/"
-RENDER_URL = "https://vitora-bot.onrender.com"
-PAYMENT_CARD = "9860 1501 1189 2918"
+    <!-- TAB 2: KATALOG -->
+    <div id="tab-catalog" class="tab-page">
+      <div class="section-title">Категориялар ва Каталог</div>
+      <input type="text" id="searchCat" class="search-box" placeholder="🔍 Каталогдан излаш..." oninput="renderProducts()" />
+      <div id="catBar" class="cats"></div>
+      <div id="catGrid" class="grid"></div>
+    </div>
 
-bot = telebot.TeleBot(TOKEN, threaded=False)
-app = Flask(__name__)
-admin_drafts = {}
-pending_photo_pid = {}
+    <!-- TAB 3: BUYURTMALAR / SAVATCHA -->
+    <div id="tab-cart" class="tab-page">
+      <div class="section-title">Саватча ва Буюртма</div>
+      <div id="cartList"></div>
+      <div id="checkoutSection" style="display:none;">
+        <div class="total-row">
+          <span>Жами:</span>
+          <span id="cartTotal">0 сўм</span>
+        </div>
+        <div class="form-box">
+          <div class="form-title">Буюртма маълумотлари</div>
 
-@app.after_request
-def add_cors_headers(response):
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type"
-    response.headers["Access-Control-Allow-Methods"] = "POST, GET, OPTIONS"
-    return response
+          <label>Телефон рақами *</label>
+          <input type="tel" id="phoneInput" placeholder="+998 90 123 45 67" />
 
-conn = sqlite3.connect("vitora.db", check_same_thread=False)
-cursor = conn.cursor()
+          <label>Қабул қилиш усули</label>
+          <select id="deliveryType" onchange="toggleAddress()">
+            <option value="Етказиб бериш (Доставка)">Етказиб бериш (Доставка)</option>
+            <option value="Дорихонадан олиб кетиш (Самовывоз)">Дорихонадан олиб кетиш (Самовывоз)</option>
+          </select>
 
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS users (
-    user_id INTEGER PRIMARY KEY,
-    full_name TEXT,
-    phone TEXT,
-    card_id TEXT,
-    bonus INTEGER DEFAULT 5000,
-    lang TEXT DEFAULT 'uz'
-)
-""")
+          <div id="addressWrap">
+            <label>Манзил</label>
+            <input type="text" id="addressInput" placeholder="Самарқанд, кўча, уй/мўлжал" />
+          </div>
 
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS products (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    category TEXT DEFAULT 'Витамины',
-    price INTEGER NOT NULL,
-    stock INTEGER DEFAULT 0,
-    description TEXT DEFAULT '',
-    image_data TEXT DEFAULT ''
-)
-""")
-conn.commit()
+          <label>Тўлов усули *</label>
+          <select id="paymentMethod" onchange="toggleCardBox()">
+            <option value="Нақд пул">💵 Нақд пул</option>
+            <option value="Click">💳 Click (картага ўтказма)</option>
+            <option value="Payme">💳 Payme (картага ўтказма)</option>
+          </select>
 
-try:
-    cursor.execute("ALTER TABLE products ADD COLUMN stock INTEGER DEFAULT 0")
-    conn.commit()
-except Exception:
-    pass
+          <div id="cardPayBox" class="card-pay-box">
+            <div style="font-size:12px; color:#cbd5e1;">Тўлов учун Humo карта рақами:</div>
+            <div class="card-num-row">
+              <span class="card-digits" id="cardNumberText">9860 1501 1189 2918</span>
+              <button type="button" class="copy-btn" onclick="copyCard()">Нусхалаш</button>
+            </div>
+            <div style="font-size:11px; color:#94a3b8; margin-top:6px;">Тўлов чекини ботга юборинг.</div>
+          </div>
 
-def get_card_id(user_id: int) -> str:
-    return "VTR-" + hex(abs(user_id))[2:].upper().zfill(8)[:8]
+          <button type="button" class="submit-btn" id="submitBtn" onclick="submitOrder()">Буюртмани расмийлаштириш</button>
+        </div>
+      </div>
+    </div>
 
-def main_menu():
-    kb = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    kb.add(types.KeyboardButton("🛍 Buyurtma berish", web_app=types.WebAppInfo(url=WEBAPP_URL)))
-    kb.add(
-        types.KeyboardButton("💳 Mening kartam"),
-        types.KeyboardButton("🎁 Bonuslarim"),
-        types.KeyboardButton("📦 Buyurtmalarim"),
-        types.KeyboardButton("📍 Filiallarimiz"),
-        types.KeyboardButton("💬 Operator bilan aloqa"),
-        types.KeyboardButton("⚙️ Sozlamalar")
-    )
-    return kb
+    <!-- TAB 4: YANA -->
+    <div id="tab-more" class="tab-page">
+      <div class="section-title">Vitora | Smart Pharm</div>
+      <div class="info-card">
+        <b>📍 Филиалимиз:</b><br/>
+        <span style="color:#94a3b8;font-size:13px;">Самарқанд шаҳри, асосий филиал.<br/>Иш вақти: 08:00 – 22:00</span>
+      </div>
+      <div class="info-card">
+        <b>💳 Тўлов картаси (Click / Payme):</b><br/>
+        <span style="color:#60a5fa;font-size:14px;font-weight:700;">9860 1501 1189 2918</span>
+      </div>
+    </div>
+  </div>
 
-# ================= EXCEL (.XLSX) ORQALI TOVAR YUKLASH =================
-@bot.message_handler(content_types=["document"], func=lambda m: m.from_user.id == ADMIN_ID)
-def admin_upload_excel(message):
-    doc = message.document
-    if not doc.file_name.lower().endswith(".xlsx"):
-        bot.send_message(message.chat.id, "⚠️ Iltimos, faqat <b>.xlsx</b> formatidagi Excel fayl yuboring.", parse_mode="HTML")
-        return
+  <!-- PASTKI MENYU -->
+  <div class="bottom-nav">
+    <button class="nav-item active" onclick="switchTab('home', this)">
+      <span class="nav-icon">🏠</span><span>Асосий</span>
+    </button>
+    <button class="nav-item" onclick="switchTab('catalog', this)">
+      <span class="nav-icon">📦</span><span>Каталог</span>
+    </button>
+    <button class="nav-item" onclick="switchTab('cart', this)">
+      <span class="nav-icon">🛍</span><span>Буюртмалар</span>
+      <span class="cart-badge" id="cartBadge" style="display:none;">0</span>
+    </button>
+    <button class="nav-item" onclick="switchTab('more', this)">
+      <span class="nav-icon">•••</span><span>Яна</span>
+    </button>
+  </div>
 
-    file_info = bot.get_file(doc.file_id)
-    downloaded = bot.download_file(file_info.file_path)
-    wb = openpyxl.load_workbook(io.BytesIO(downloaded), data_only=True)
-    ws = wb["Tovarlar"] if "Tovarlar" in wb.sheetnames else wb.active
+  <script>
+    const API_BASE = "https://vitora-bot.onrender.com";
+    const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+    if (tg) { tg.expand(); tg.ready(); }
 
-    added_count = 0
-    for row in ws.iter_rows(min_row=5, values_only=True):
-        if not row or len(row) < 4:
-            continue
-        name = str(row[1] or "").strip()
-        if not name or name.startswith("JAMI"):
-            continue
-        category = str(row[2] or "Витамины").strip()
-        try:
-            price = int(float(row[3] or 0))
-        except Exception:
-            price = 0
-        try:
-            stock = int(float(row[4] or 0)) if len(row) > 4 and row[4] is not None else 0
-        except Exception:
-            stock = 0
-        description = str(row[6] or "").strip() if len(row) > 6 else ""
-        image_url = str(row[7] or "").strip() if len(row) > 7 else ""
+    const tgUser = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? tg.initDataUnsafe.user : {};
+    const userId = tgUser.id || 0;
+    const fullName = [tgUser.first_name, tgUser.last_name].filter(Boolean).join(" ") || "Мижоз";
+    const username = tgUser.username || "yoq";
+    const cardId = "VTR-" + Math.abs(userId || 1).toString(16).toUpperCase().padStart(8, "0").slice(0, 8);
 
-        if price > 0:
-            cursor.execute(
-                "INSERT INTO products (name, category, price, stock, description, image_data) VALUES (?, ?, ?, ?, ?, ?)",
-                (name, category, price, stock, description, image_url)
-            )
-            added_count += 1
+    document.getElementById("userName").textContent = fullName;
+    document.getElementById("userCardId").textContent = "ID: " + cardId;
 
-    conn.commit()
-    bot.send_message(
-        message.chat.id,
-        f"📊 <b>Excel fayl muvaffaqiyatli yuklandi!</b>\n\n"
-        f"✅ Qo‘shilgan tovarlar soni: <b>{added_count} ta</b>\n\n"
-        f"📋 Barchasini ko‘rish: <code>/products</code>\n"
-        f"🖼 Biror tovarga rasm biriktirish uchun: <code>/photo ID</code> (masalan: <code>/photo 1</code>)",
-        parse_mode="HTML"
-    )
+    let products = [];
+    let cart = {};
+    let selectedCategory = "Барчаси";
 
-@bot.message_handler(commands=["photo"])
-def admin_attach_photo_cmd(message):
-    if message.from_user.id != ADMIN_ID:
-        return
-    parts = message.text.split()
-    if len(parts) < 2 or not parts[1].isdigit():
-        bot.send_message(message.chat.id, "⚠️ To‘g‘ri format: <code>/photo 1</code> (ID raqamini yozing)", parse_mode="HTML")
-        return
-    pid = int(parts[1])
-    cursor.execute("SELECT name FROM products WHERE id = ?", (pid,))
-    row = cursor.fetchone()
-    if not row:
-        bot.send_message(message.chat.id, "⚠️ Bunday ID raqamli tovar topilmadi.")
-        return
-    pending_photo_pid[ADMIN_ID] = pid
-    bot.send_message(
-        message.chat.id,
-        f"📸 <b>{row[0]}</b> (ID: <code>{pid}</code>) uchun rasm yuboring:",
-        parse_mode="HTML"
-    )
+    function switchTab(tabName, btn) {
+      document.querySelectorAll(".tab-page").forEach(p => p.classList.remove("active"));
+      document.querySelectorAll(".nav-item").forEach(b => b.classList.remove("active"));
+      document.getElementById("tab-" + tabName).classList.add("active");
+      btn.classList.add("active");
+      if (tabName === "cart") renderCart();
+    }
 
-# ================= YAKKA TARTIBDA ADMIN BUYRUQLARI =================
-@bot.message_handler(commands=["add"])
-def admin_add_start(message):
-    if message.from_user.id != ADMIN_ID:
-        return
-    admin_drafts[ADMIN_ID] = {"step": "photo"}
-    kb = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    kb.add(types.KeyboardButton("⏭ Rasmsiz davom etish"), types.KeyboardButton("❌ Bekor qilish"))
-    bot.send_message(
-        message.chat.id,
-        "📸 <b>1/6-qadam:</b> Tovar rasmini yuboring (yoki «Rasmsiz davom etish» tugmasini bosing):",
-        parse_mode="HTML",
-        reply_markup=kb
-    )
+    function toggleAddress() {
+      const val = document.getElementById("deliveryType").value;
+      document.getElementById("addressWrap").style.display = val.includes("Самовывоз") ? "none" : "block";
+    }
 
-@bot.message_handler(commands=["products"])
-def admin_list_products(message):
-    if message.from_user.id != ADMIN_ID:
-        return
-    cursor.execute("SELECT id, name, price, stock, category FROM products ORDER BY id DESC")
-    rows = cursor.fetchall()
-    if not rows:
-        bot.send_message(message.chat.id, "📭 Hozircha bazada qo‘shilgan tovarlar yo‘q. Excel (.xlsx) yuboring yoki /add yozing.")
-        return
-    lines = ["📦 <b>Do‘kondagi tovarlar va qoldiqlar:</b>\n"]
-    for r in rows[:50]:
-        lines.append(f"🆔 <code>{r[0]}</code> | <b>{r[1]}</b> ({r[4]})\n    💰 {r[2]:,} so‘m | 📦 Qoldiq: <b>{r[3]} dona</b>")
-    if len(rows) > 50:
-        lines.append(f"\n... va yana {len(rows) - 50} ta tovar")
-    lines.append("\n🖼 Rasm qo‘shish: <code>/photo ID</code>\n➕ Qoldiq qo‘shish: <code>/stock ID SON</code>\n🗑 O‘chirish: <code>/del ID</code>")
-    bot.send_message(message.chat.id, "\n".join(lines), parse_mode="HTML")
+    function toggleCardBox() {
+      const pm = document.getElementById("paymentMethod").value;
+      document.getElementById("cardPayBox").style.display = (pm === "Click" || pm === "Payme") ? "block" : "none";
+    }
 
-@bot.message_handler(commands=["stock"])
-def admin_update_stock(message):
-    if message.from_user.id != ADMIN_ID:
-        return
-    parts = message.text.split()
-    if len(parts) < 3 or not parts[1].isdigit() or not parts[2].lstrip("+-").isdigit():
-        bot.send_message(message.chat.id, "⚠️ To‘g‘ri format: <code>/stock 1 25</code>", parse_mode="HTML")
-        return
-    pid = int(parts[1])
-    qty = int(parts[2])
-    cursor.execute("UPDATE products SET stock = MAX(0, stock + ?) WHERE id = ?", (qty, pid))
-    conn.commit()
-    cursor.execute("SELECT name, stock FROM products WHERE id = ?", (pid,))
-    row = cursor.fetchone()
-    if row:
-        bot.send_message(message.chat.id, f"✅ <b>{row[0]}</b> yangi qoldig‘i: <b>{row[1]} dona</b>", parse_mode="HTML")
-    else:
-        bot.send_message(message.chat.id, "⚠️ Bunday ID topilmadi.")
+    function copyCard() {
+      navigator.clipboard.writeText("9860150111892918");
+      alert("Карта рақами нусхаланди: 9860 1501 1189 2918");
+    }
 
-@bot.message_handler(commands=["del"])
-def admin_delete_product(message):
-    if message.from_user.id != ADMIN_ID:
-        return
-    parts = message.text.split()
-    if len(parts) < 2 or not parts[1].isdigit():
-        bot.send_message(message.chat.id, "⚠️ To‘g‘ri format: <code>/del 1</code>", parse_mode="HTML")
-        return
-    pid = int(parts[1])
-    cursor.execute("DELETE FROM products WHERE id = ?", (pid,))
-    conn.commit()
-    bot.send_message(message.chat.id, f"🗑 ID <code>{pid}</code> raqamli tovar o‘chirildi.", parse_mode="HTML")
+    async function loadProducts() {
+      try {
+        const res = await fetch(API_BASE + "/api/products");
+        const data = await res.json();
+        products = data.products || [];
+        buildCategories();
+        renderProducts();
+      } catch (e) {
+        document.getElementById("homeGrid").textContent = "Сервер билан алоқа узилди. Қайта урининг.";
+      }
+    }
 
-@bot.message_handler(content_types=["photo"], func=lambda m: m.from_user.id == ADMIN_ID)
-def admin_receive_photo(message):
-    file_id = message.photo[-1].file_id
-    file_info = bot.get_file(file_id)
-    downloaded = bot.download_file(file_info.file_path)
-    b64_img = "data:image/jpeg;base64," + base64.b64encode(downloaded).decode("utf-8")
+    function buildCategories() {
+      const cats = ["Барчаси", ...new Set(products.map(p => p.category).filter(Boolean))];
+      const bar = document.getElementById("catBar");
+      bar.innerHTML = cats.map(c =>
+        `<button class="cat-btn ${c === selectedCategory ? 'active' : ''}" onclick="selectCat('${c.replace(/'/g, "\\'")}')">${c}</button>`
+      ).join("");
+    }
 
-    if ADMIN_ID in pending_photo_pid:
-        pid = pending_photo_pid.pop(ADMIN_ID)
-        cursor.execute("UPDATE products SET image_data = ? WHERE id = ?", (b64_img, pid))
-        conn.commit()
-        bot.send_message(message.chat.id, f"✅ ID <code>{pid}</code> raqamli tovarga rasm muvaffaqiyatli biriktirildi!", parse_mode="HTML")
-        return
+    function selectCat(cat) {
+      selectedCategory = cat;
+      buildCategories();
+      renderProducts();
+    }
 
-    if ADMIN_ID in admin_drafts and admin_drafts[ADMIN_ID].get("step") == "photo":
-        draft = admin_drafts[ADMIN_ID]
-        draft["image_data"] = b64_img
-        draft["step"] = "name"
-        bot.send_message(
-            message.chat.id,
-            "✅ Rasm qabul qilindi!\n\n✍️ <b>2/6-qadam:</b> Tovar nomini yozing:",
-            parse_mode="HTML",
-            reply_markup=types.ReplyKeyboardRemove()
-        )
+    function getCategoryVisual(cat) {
+      const c = (cat || "").toLowerCase();
+      if (c.includes("омега") || c.includes("рыб")) return { icon: "🐟", bg: "linear-gradient(135deg,#fef3c7,#fde68a)", label: "OMEGA-3" };
+      if (c.includes("дет")) return { icon: "🧸", bg: "linear-gradient(135deg,#fce7f3,#fbcfe8)", label: "KIDS" };
+      if (c.includes("фито") || c.includes("трав") || c.includes("экстракт")) return { icon: "🌿", bg: "linear-gradient(135deg,#dcfce7,#bbf7d0)", label: "PHYTO" };
+      if (c.includes("сустав") || c.includes("кост")) return { icon: "🦴", bg: "linear-gradient(135deg,#e0e7ff,#c7d2fe)", label: "OSTEO" };
+      if (c.includes("минерал")) return { icon: "💎", bg: "linear-gradient(135deg,#cffafe,#a5f3fc)", label: "MINERAL" };
+      if (c.includes("иммун")) return { icon: "🛡️", bg: "linear-gradient(135deg,#ffedd5,#fed7aa)", label: "IMMUNO" };
+      if (c.includes("желуд") || c.includes("пищевар") || c.includes("пробио")) return { icon: "🧬", bg: "linear-gradient(135deg,#f3e8ff,#e9d5ff)", label: "BIO" };
+      return { icon: "💊", bg: "linear-gradient(135deg,#dbeafe,#bfdbfe)", label: "VITAMIN" };
+    }
 
-@bot.message_handler(func=lambda m: m.from_user.id == ADMIN_ID and ADMIN_ID in admin_drafts)
-def admin_receive_steps(message):
-    text = (message.text or "").strip()
-    if text == "❌ Bekor qilish":
-        admin_drafts.pop(ADMIN_ID, None)
-        bot.send_message(message.chat.id, "❌ Tovar qo‘shish bekor qilindi.", reply_markup=main_menu())
-        return
+    function cardHTML(p) {
+      const qty = cart[p.id] || 0;
+      const inStock = (p.stock || 0) > 0;
+      const vis = getCategoryVisual(p.category);
+      const imgBlock = p.image
+        ? `<img src="${p.image}" alt="${p.name}" />`
+        : `<div style="width:100%;height:100%;background:${vis.bg};display:flex;flex-direction:column;align-items:center;justify-content:center;">
+             <div style="font-size:40px;line-height:1;">${vis.icon}</div>
+             <div style="font-size:10px;font-weight:800;color:#1e293b;margin-top:4px;letter-spacing:0.8px;">${vis.label}</div>
+           </div>`;
+      const actionBlock = qty > 0
+        ? `<div class="qty-ctrl">
+             <button onclick="changeQty(${p.id}, -1)">−</button>
+             <span>${qty}</span>
+             <button onclick="changeQty(${p.id}, 1)">+</button>
+           </div>`
+        : `<button class="add-btn" ${inStock ? "" : "disabled"} onclick="changeQty(${p.id}, 1)">+</button>`;
 
-    draft = admin_drafts[ADMIN_ID]
-    step = draft.get("step")
+      return `
+        <div class="card">
+          <div>
+            <div class="img-wrap">
+              <span class="badge-id">${p.id}</span>
+              ${imgBlock}
+            </div>
+            <div class="p-name">${p.name}</div>
+            <div class="p-cat">${p.category || ""}</div>
+            <div class="p-desc">${p.description || ""}</div>
+          </div>
+          <div>
+            <div class="p-stock ${inStock ? "" : "out"}">${inStock ? "Қолдиқ: " + p.stock + " дона" : "Тугаган"}</div>
+            <div class="card-bottom">
+              <div class="p-price">${Number(p.price).toLocaleString()} сўм</div>
+              ${actionBlock}
+            </div>
+          </div>
+        </div>
+      `;
+    }
 
-    if step == "photo" and text == "⏭ Rasmsiz davom etish":
-        draft["image_data"] = ""
-        draft["step"] = "name"
-        bot.send_message(
-            message.chat.id,
-            "✍️ <b>2/6-qadam:</b> Tovar nomini yozing:",
-            parse_mode="HTML",
-            reply_markup=types.ReplyKeyboardRemove()
-        )
-    elif step == "name":
-        draft["name"] = text
-        draft["step"] = "category"
-        kb = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True, row_width=2)
-        kb.add("Витамины и комплексы", "Омега-3 и рыбий жир", "Минералы и микроэлементы", "Для детей", "Для суставов и костей", "Фиточаи, травы и экстракты")
-        bot.send_message(
-            message.chat.id,
-            "📂 <b>3/6-qadam:</b> Kategoriyani tanlang yoki yozing:",
-            parse_mode="HTML",
-            reply_markup=kb
-        )
-    elif step == "category":
-        draft["category"] = text
-        draft["step"] = "price"
-        bot.send_message(
-            message.chat.id,
-            "💰 <b>4/6-qadam:</b> Sotuv narxini faqat raqamda yozing (masalan: <code>145000</code>):",
-            parse_mode="HTML",
-            reply_markup=types.ReplyKeyboardRemove()
-        )
-    elif step == "price":
-        digits = "".join(c for c in text if c.isdigit())
-        if not digits:
-            bot.send_message(message.chat.id, "⚠️ Iltimos, narxni faqat raqamda yozing:")
-            return
-        draft["price"] = int(digits)
-        draft["step"] = "stock"
-        bot.send_message(
-            message.chat.id,
-            "📦 <b>5/6-qadam:</b> Omborga nechta keldi? (sonini yozing, masalan: <code>30</code>):",
-            parse_mode="HTML"
-        )
-    elif step == "stock":
-        digits = "".join(c for c in text if c.isdigit())
-        if not digits:
-            bot.send_message(message.chat.id, "⚠️ Iltimos, kelgan sonini faqat raqamda yozing:")
-            return
-        draft["stock"] = int(digits)
-        draft["step"] = "description"
-        bot.send_message(
-            message.chat.id,
-            "📝 <b>6/6-qadam:</b> Qisqa tavsif / tarkibini yozing:",
-            parse_mode="HTML"
-        )
-    elif step == "description":
-        draft["description"] = text
-        cursor.execute(
-            "INSERT INTO products (name, category, price, stock, description, image_data) VALUES (?, ?, ?, ?, ?, ?)",
-            (draft["name"], draft["category"], draft["price"], draft["stock"], draft["description"], draft.get("image_data", ""))
-        )
-        conn.commit()
-        new_id = cursor.lastrowid
-        admin_drafts.pop(ADMIN_ID, None)
-        bot.send_message(
-            message.chat.id,
-            f"🎉 <b>Tovar qo‘shildi!</b>\n🆔 ID: <code>{new_id}</code> | <b>{draft['name']}</b> — {draft['price']:,} so‘m ({draft['stock']} dona)",
-            parse_mode="HTML",
-            reply_markup=main_menu()
-        )
+    function renderProducts() {
+      const qHome = (document.getElementById("searchHome").value || "").toLowerCase();
+      const qCat = (document.getElementById("searchCat").value || "").toLowerCase();
 
-# ================= FOYDALANUVCHI BUYRUQLARI =================
-@bot.message_handler(commands=["start"])
-def start_cmd(message):
-    uid = message.from_user.id
-    cursor.execute("SELECT phone, card_id FROM users WHERE user_id = ?", (uid,))
-    row = cursor.fetchone()
-    if row and row[0]:
-        bot.send_message(
-            message.chat.id,
-            f"👋 Xush kelibsiz, <b>{message.from_user.first_name}</b>!\n"
-            f"💳 Karta ID: <code>{row[1]}</code>\n\nQuyidagi tugmalardan birini tanlang:",
-            parse_mode="HTML",
-            reply_markup=main_menu()
-        )
-    else:
-        kb = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-        kb.add(types.KeyboardButton("📱 Telefon raqamni yuborish", request_contact=True))
-        bot.send_message(
-            message.chat.id,
-            "Assalomu alaykum! <b>Vitora | Smart Pharm</b> dorixonasi botiga xush kelibsiz.\n\n"
-            "Ro'yxatdan o'tish va <b>5 000 so'm</b> bonus olish uchun telefon raqamingizni yuboring:",
-            parse_mode="HTML",
-            reply_markup=kb
-        )
+      const homeFiltered = products.filter(p => p.name.toLowerCase().includes(qHome)).slice(0, 40);
+      document.getElementById("homeGrid").innerHTML = homeFiltered.length
+        ? homeFiltered.map(cardHTML).join("")
+        : "<div style='color:#94a3b8;'>Маҳсулот топилмади</div>";
 
-@bot.message_handler(content_types=["contact"])
-def handle_contact(message):
-    uid = message.from_user.id
-    phone = message.contact.phone_number
-    name = message.from_user.first_name or "Mijoz"
-    card_id = get_card_id(uid)
-    cursor.execute(
-        "INSERT OR REPLACE INTO users (user_id, full_name, phone, card_id, bonus) VALUES (?, ?, ?, ?, 5000)",
-        (uid, name, phone, card_id)
-    )
-    conn.commit()
-    bot.send_message(
-        message.chat.id,
-        f"✅ Tabriklaymiz, <b>{name}</b>! Siz muvaffaqiyatli ro'yxatdan o'tdingiz.\n"
-        f"💳 Karta raqamingiz: <code>{card_id}</code>\n"
-        f"🎁 Hisobingizga <b>5 000 so'm</b> bonus qo'shildi!",
-        parse_mode="HTML",
-        reply_markup=main_menu()
-    )
+      const catFiltered = products.filter(p => {
+        const matchCat = selectedCategory === "Барчаси" || p.category === selectedCategory;
+        const matchQ = p.name.toLowerCase().includes(qCat);
+        return matchCat && matchQ;
+      });
+      document.getElementById("catGrid").innerHTML = catFiltered.length
+        ? catFiltered.map(cardHTML).join("")
+        : "<div style='color:#94a3b8;'>Маҳсулот топилмади</div>";
+    }
 
-@bot.message_handler(func=lambda m: m.text == "💳 Mening kartam")
-def my_card(message):
-    uid = message.from_user.id
-    card_id = get_card_id(uid)
-    cursor.execute("SELECT bonus FROM users WHERE user_id = ?", (uid,))
-    row = cursor.fetchone()
-    bonus = row[0] if row else 5000
-    bot.send_message(
-        message.chat.id,
-        f"💳 <b>Vitora Loyalty Karta</b>\n\n"
-        f"🆔 Karta ID: <code>{card_id}</code>\n"
-        f"💰 Bonus: <b>{bonus:,} so'm</b>\n"
-        f"🏅 Daraja: <b>Bronza</b>",
-        parse_mode="HTML"
-    )
+    function changeQty(pid, delta) {
+      const prod = products.find(x => x.id === pid);
+      if (!prod) return;
+      const next = (cart[pid] || 0) + delta;
+      if (next <= 0) delete cart[pid];
+      else if (next <= prod.stock) cart[pid] = next;
+      else alert("Омборда фақат " + prod.stock + " дона бор!");
 
-@bot.message_handler(func=lambda m: m.text == "🎁 Bonuslarim")
-def my_bonus(message):
-    uid = message.from_user.id
-    cursor.execute("SELECT bonus FROM users WHERE user_id = ?", (uid,))
-    row = cursor.fetchone()
-    bonus = row[0] if row else 5000
-    bot.send_message(message.chat.id, f"🎁 Sizning joriy bonusingiz: <b>{bonus:,} so'm</b>", parse_mode="HTML")
+      updateBadge();
+      renderProducts();
+      renderCart();
+    }
 
-@bot.message_handler(func=lambda m: m.text == "📍 Filiallarimiz")
-def branches(message):
-    bot.send_message(
-        message.chat.id,
-        "📍 <b>Vitora | Smart Pharm</b>\nSamarqand shahri, asosiy filial.\n🕒 Ish vaqti: 08:00 – 22:00",
-        parse_mode="HTML"
-    )
+    function updateBadge() {
+      const totalCount = Object.values(cart).reduce((a, b) => a + b, 0);
+      const badge = document.getElementById("cartBadge");
+      badge.style.display = totalCount > 0 ? "inline-block" : "none";
+      badge.textContent = totalCount;
+    }
 
-@bot.message_handler(func=lambda m: m.text == "💬 Operator bilan aloqa")
-def contact_op(message):
-    bot.send_message(message.chat.id, "✍️ Savolingizni shu yerga yozing — operatorimiz tez orada javob beradi.")
+    function renderCart() {
+      const ids = Object.keys(cart).map(Number);
+      const list = document.getElementById("cartList");
+      const sec = document.getElementById("checkoutSection");
 
-@bot.message_handler(func=lambda m: m.text == "📦 Buyurtmalarim")
-def my_orders(message):
-    bot.send_message(message.chat.id, "📦 Buyurtmalaringizni do'kon menyusidagi «Буюртмалар» bo'limidan kuzatishingiz mumkin.")
+      if (!ids.length) {
+        list.innerHTML = "<div class='info-card' style='color:#94a3b8;text-align:center;'>Саватчангиз ҳозирча бўш.</div>";
+        sec.style.display = "none";
+        return;
+      }
 
-@bot.message_handler(func=lambda m: m.text == "⚙️ Sozlamalar")
-def settings(message):
-    bot.send_message(message.chat.id, "⚙️ Til: O'zbekcha\n🔔 Bildirishnomalar: Yoqilgan")
+      let total = 0;
+      list.innerHTML = ids.map(id => {
+        const p = products.find(x => x.id === id);
+        if (!p) return "";
+        const qty = cart[id];
+        total += p.price * qty;
+        return `
+          <div class="cart-item">
+            <div style="flex:1;">
+              <div style="font-size:13px;font-weight:700;">${p.name}</div>
+              <div style="font-size:12px;color:#60a5fa;margin-top:3px;">${Number(p.price).toLocaleString()} сўм</div>
+            </div>
+            <div class="qty-ctrl">
+              <button onclick="changeQty(${p.id}, -1)">−</button>
+              <span>${qty}</span>
+              <button onclick="changeQty(${p.id}, 1)">+</button>
+            </div>
+          </div>
+        `;
+      }).join("");
 
-# ================= WEBHOOK & MINI APP API =================
-@app.route("/webhook", methods=["POST"])
-def telegram_webhook():
-    json_str = request.get_data().decode("utf-8")
-    update = telebot.types.Update.de_json(json_str)
-    bot.process_new_updates([update])
-    return "OK", 200
+      document.getElementById("cartTotal").textContent = total.toLocaleString() + " сўм";
+      sec.style.display = "block";
+    }
 
-@app.route("/api/config", methods=["GET"])
-def api_config():
-    return jsonify({"ok": True, "payment_card": PAYMENT_CARD}), 200
+    async function submitOrder() {
+      const phone = document.getElementById("phoneInput").value.trim();
+      if (!phone) {
+        alert("Илтимос, телефон рақамингизни киритинг!");
+        return;
+      }
+      const delivery_type = document.getElementById("deliveryType").value;
+      const address = document.getElementById("addressInput").value.trim();
+      const payment_method = document.getElementById("paymentMethod").value;
 
-@app.route("/api/products", methods=["GET"])
-def api_products():
-    cursor.execute("SELECT id, name, category, price, stock, description, image_data FROM products ORDER BY id DESC")
-    rows = cursor.fetchall()
-    items = [
-        {"id": r[0], "name": r[1], "category": r[2], "price": r[3], "stock": r[4], "description": r[5], "image": r[6]}
-        for r in rows
-    ]
-    return jsonify({"ok": True, "products": items, "payment_card": PAYMENT_CARD}), 200
+      const ids = Object.keys(cart).map(Number);
+      let total = 0;
+      const cartArr = [];
+      const lines = [];
 
-@app.route("/api/order", methods=["POST", "OPTIONS"])
-def api_order():
-    if request.method == "OPTIONS":
-        return jsonify({"ok": True}), 200
-    data = request.get_json(silent=True) or {}
-    user_id = data.get("user_id")
-    phone = (data.get("phone") or "").strip()
-    if not phone and user_id:
-        cursor.execute("SELECT phone FROM users WHERE user_id = ?", (int(user_id),))
-        row = cursor.fetchone()
-        if row and row[0]:
-            phone = row[0]
-    if not phone:
-        phone = "Ko'rsatilmagan"
+      ids.forEach((id, idx) => {
+        const p = products.find(x => x.id === id);
+        if (!p) return;
+        const qty = cart[id];
+        const sub = p.price * qty;
+        total += sub;
+        cartArr.push({ id: p.id, qty });
+        lines.push(`${idx + 1}. ${p.name} — ${qty} дона × ${p.price.toLocaleString()} = ${sub.toLocaleString()} сўм`);
+      });
 
-    delivery_type = data.get("delivery_type", "Yetkazib berish")
-    address = (data.get("address") or "").strip() or "Dorixonadan olib ketish"
-    payment_method = data.get("payment_method", "Naqd pul")
+      const btn = document.getElementById("submitBtn");
+      btn.disabled = true;
+      btn.textContent = "Юборилмоқда...";
 
-    cart_items = data.get("cart", [])
-    if isinstance(cart_items, list):
-        for item in cart_items:
-            pid = item.get("id")
-            qty = int(item.get("qty", 1))
-            if pid:
-                cursor.execute("UPDATE products SET stock = MAX(0, stock - ?) WHERE id = ?", (qty, int(pid)))
-        conn.commit()
+      try {
+        const res = await fetch(API_BASE + "/api/order", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user_id: userId,
+            name: fullName,
+            username: username,
+            card: cardId,
+            phone,
+            delivery_type,
+            address,
+            payment_method,
+            cart: cartArr,
+            items: lines.join("\n"),
+            total
+          })
+        });
+        const data = await res.json();
+        if (data.ok) {
+          alert("✅ Буюртмангиз қабул қилинди! Тез орада оператор боғланади.");
+          cart = {};
+          updateBadge();
+          await loadProducts();
+          renderCart();
+        } else {
+          alert("Хатолик юз берди: " + (data.error || ""));
+        }
+      } catch (e) {
+        alert("Серверга уланиб бўлмади.");
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Буюртмани расмийлаштириш";
+      }
+    }
 
-    text = (
-        f"🆕 <b>YANGI BUYURTMA!</b>\n\n"
-        f"👤 Mijoz: <b>{data.get('name', 'Mijoz')}</b> (@{data.get('username', 'yoq')})\n"
-        f"📞 Tel: <code>{phone}</code>\n"
-        f"💳 To‘lov: <b>{payment_method}</b> (Karta: <code>{PAYMENT_CARD}</code>)\n"
-        f"🚚 Usul: <b>{delivery_type}</b>\n"
-        f"📍 Manzil: <i>{address}</i>\n"
-        f"🆔 Karta ID: <code>{data.get('card', '—')}</code>\n\n"
-        f"💊 <b>Mahsulotlar:</b>\n{data.get('items', '')}\n\n"
-        f"💰 <b>Jami: {int(data.get('total', 0)):,} so'm</b>"
-    )
-    try:
-        bot.send_message(ADMIN_ID, text, parse_mode="HTML")
-        return jsonify({"ok": True, "payment_card": PAYMENT_CARD}), 200
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
-
-@app.route("/")
-def index():
-    return "Vitora Bot Webhook is running 24/7!"
-
-def setup_webhook():
-    time.sleep(3)
-    bot.remove_webhook()
-    time.sleep(1)
-    bot.set_webhook(url=f"{RENDER_URL}/webhook")
-
-if __name__ == "__main__":
-    threading.Thread(target=setup_webhook, daemon=True).start()
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    loadProducts();
+  </script>
+</body>
+</html>
