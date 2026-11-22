@@ -313,16 +313,24 @@ def api_order():
         return jsonify({"ok": True}), 200
     data = request.get_json(silent=True) or {}
     user_id = data.get("user_id")
-    phone = "Ko'rsatilmagan"
-    if user_id:
+    phone = (data.get("phone") or "").strip()
+    if not phone and user_id:
         cursor.execute("SELECT phone FROM users WHERE user_id = ?", (int(user_id),))
         row = cursor.fetchone()
         if row and row[0]:
             phone = row[0]
+    if not phone:
+        phone = "Ko'rsatilmagan"
+
+    delivery_type = data.get("delivery_type", "Yetkazib berish")
+    address = (data.get("address") or "").strip() or "Dorixonadan olib ketish"
+
     text = (
         f"🆕 <b>YANGI BUYURTMA!</b>\n\n"
         f"👤 Mijoz: <b>{data.get('name', 'Mijoz')}</b> (@{data.get('username', 'yoq')})\n"
         f"📞 Tel: <code>{phone}</code>\n"
+        f"🚚 Usul: <b>{delivery_type}</b>\n"
+        f"📍 Manzil: <i>{address}</i>\n"
         f"💳 Karta: <code>{data.get('card', '—')}</code>\n\n"
         f"💊 <b>Mahsulotlar:</b>\n{data.get('items', '')}\n\n"
         f"💰 <b>Jami: {int(data.get('total', 0)):,} so'm</b>"
