@@ -11,7 +11,7 @@ from telebot import types
 
 TOKEN = "9250053752:AAHW1tI5OZAXio-fcbnIy-wF24yOxIEQGCk"
 ADMIN_ID = 5055854613
-WEBAPP_URL = "https://relaxed-meerkat-9b9fbb.netlify.app"
+WEBAPP_URL = "https://uzumseller41-jpg.github.io/vitora-shop/"
 RENDER_URL = "https://vitora-bot.onrender.com"
 PAYMENT_CARD = "9860 1501 1189 2918"
 
