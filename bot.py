@@ -20,6 +20,7 @@ HUMO_CARD = "9860 1501 1189 2918"
 bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 app = Flask(__name__)
 CORS(app)
+waiting_support = set()
 
 
 # ================= MA'LUMOTLAR BAZASI =================
@@ -27,6 +28,10 @@ def get_db():
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def make_card_id(user_id):
+    return "VTR-" + hex(abs(int(user_id or 1)))[2:].upper().zfill(8)[:8]
 
 
 def init_db():
@@ -37,7 +42,8 @@ def init_db():
             user_id INTEGER PRIMARY KEY,
             name TEXT,
             username TEXT,
-            phone TEXT
+            phone TEXT,
+            bonus INTEGER DEFAULT 5000
         )
     """)
     cur.execute("""
@@ -168,15 +174,29 @@ init_db()
 auto_seed_from_excel()
 
 
-# ================= TELEGRAM BOT BUYRUQLARI =================
-def shop_keyboard():
+# ================= ASOSIY MENYU KLAVIATURASI =================
+def main_menu_keyboard():
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add(types.KeyboardButton(text="🛍 Do'konni ochish", web_app=types.WebAppInfo(url=WEBAPP_URL)))
+    kb.row(types.KeyboardButton(text="🛍 Буюртма бериш", web_app=types.WebAppInfo(url=WEBAPP_URL)))
+    kb.row(
+        types.KeyboardButton(text="🎁 Бонусларим"),
+        types.KeyboardButton(text="🧾 Харидларим")
+    )
+    kb.row(
+        types.KeyboardButton(text="📍 Филиаллар"),
+        types.KeyboardButton(text="💬 Мурожаат")
+    )
+    kb.row(
+        types.KeyboardButton(text="🚀 Кабинетим", web_app=types.WebAppInfo(url=WEBAPP_URL)),
+        types.KeyboardButton(text="🌐 Сайт")
+    )
     return kb
 
 
+# ================= TELEGRAM BOT BUYRUQLARI =================
 @bot.message_handler(commands=["start"])
 def cmd_start(message):
+    waiting_support.discard(message.from_user.id)
     conn = get_db()
     user = conn.execute("SELECT phone FROM users WHERE user_id = ?", (message.from_user.id,)).fetchone()
     conn.close()
@@ -184,20 +204,17 @@ def cmd_start(message):
     if user and user["phone"]:
         bot.send_message(
             message.chat.id,
-            f"Assalomu alaykum, <b>{message.from_user.first_name}</b>!\n\n"
-            "🏥 <b>Vitora | Smart Pharm</b> dorixonasiga xush kelibsiz.\n"
-            "Buyurtma berish uchun pastdagi tugmani bosing 👇",
-            parse_mode="HTML",
-            reply_markup=shop_keyboard()
+            "Нима қиламиз? Пастдаги тугмалардан бирини танланг.",
+            reply_markup=main_menu_keyboard()
         )
     else:
         kb = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-        kb.add(types.KeyboardButton(text="📱 Telefon raqamni yuborish", request_contact=True))
+        kb.add(types.KeyboardButton(text="📱 Рақамни юбориш", request_contact=True))
         bot.send_message(
             message.chat.id,
-            f"Assalomu alaykum, <b>{message.from_user.first_name}</b>!\n\n"
-            "🏥 <b>Vitora | Smart Pharm</b> dorixonasi botiga xush kelibsiz.\n"
-            "Ro'yxatdan o'tish va bonus kartangizni faollashtirish uchun telefon raqamingizni yuboring 👇",
+            f"Ассалому алайкум, <b>{message.from_user.first_name}</b>! 👋\n\n"
+            "<b>Vitora | Smart Pharm</b> дорихонаси ботига хуш келибсиз.\n"
+            "Бошлаш учун пастдаги тугмани босиб телефон рақамингизни юборинг 👇",
             parse_mode="HTML",
             reply_markup=kb
         )
@@ -211,24 +228,112 @@ def handle_contact(message):
     if not phone.startswith("+"):
         phone = "+" + phone
 
+    uid = message.from_user.id
+    card = make_card_id(uid)
+
     conn = get_db()
     conn.execute(
-        "INSERT OR REPLACE INTO users (user_id, name, username, phone) VALUES (?, ?, ?, ?)",
-        (message.from_user.id, message.from_user.first_name, message.from_user.username or "", phone)
+        "INSERT OR REPLACE INTO users (user_id, name, username, phone, bonus) VALUES (?, ?, ?, ?, 5000)",
+        (uid, message.from_user.first_name, message.from_user.username or "", phone)
     )
     conn.commit()
     conn.close()
 
     bot.send_message(
         message.chat.id,
-        f"✅ Raqamingiz tasdiqlandi: <b>{phone}</b>\n"
-        "🎁 Sizga <b>5 000 so'm</b> bonus berildi!\n\n"
-        "Endi do'konni ochishingiz mumkin 👇",
-        parse_mode="HTML",
-        reply_markup=shop_keyboard()
+        f"Раҳмат, <b>{message.from_user.first_name}</b>! ✅\n"
+        f"Бонус картангиз: <b>{card}</b>\n\n"
+        "Энди буюртма беришингиз мумкин — пастдаги «Буюртма бериш» тугмасини босинг.",
+        parse_mode="HTML"
+    )
+    bot.send_message(
+        message.chat.id,
+        "Нима қиламиз? Пастдаги тугмалардан бирини танланг.",
+        reply_markup=main_menu_keyboard()
     )
 
 
+@bot.message_handler(func=lambda m: m.text == "🎁 Бонусларим")
+def menu_bonuses(message):
+    uid = message.from_user.id
+    card = make_card_id(uid)
+    conn = get_db()
+    user = conn.execute("SELECT bonus FROM users WHERE user_id = ?", (uid,)).fetchone()
+    conn.close()
+    bonus = user["bonus"] if user else 5000
+
+    bot.send_message(
+        message.chat.id,
+        f"💳 <b>Бонус картангиз:</b> <code>{card}</code>\n"
+        f"🎁 <b>Жорий баланс:</b> <b>{bonus:,} сўм</b>\n"
+        f"🏅 <b>Даража:</b> Бронза\n\n"
+        "Ҳар бир харидингиздан кэшбэк йиғилиб боради!",
+        parse_mode="HTML",
+        reply_markup=main_menu_keyboard()
+    )
+
+
+@bot.message_handler(func=lambda m: m.text == "🧾 Харидларим")
+def menu_orders(message):
+    uid = message.from_user.id
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT id, items, total, payment_method, created_at FROM orders WHERE user_id = ? ORDER BY id DESC LIMIT 10",
+        (uid,)
+    ).fetchall()
+    conn.close()
+
+    if not rows:
+        bot.send_message(
+            message.chat.id,
+            "Ҳали харид қайд этилмаган.\n"
+            "Буюртма берганингиздан сўнг барча харидларингиз шу ерда кўринади.",
+            reply_markup=main_menu_keyboard()
+        )
+        return
+
+    lines = ["🧾 <b>Сўнгги харидларингиз:</b>\n"]
+    for r in rows:
+        lines.append(f"🔹 <b>Буюртма #{r['id']}</b> — <b>{r['total']:,} сўм</b> ({r['payment_method']})\n{r['items']}\n")
+    bot.send_message(message.chat.id, "\n".join(lines), parse_mode="HTML", reply_markup=main_menu_keyboard())
+
+
+@bot.message_handler(func=lambda m: m.text == "📍 Филиаллар")
+def menu_branches(message):
+    bot.send_message(
+        message.chat.id,
+        "🏥 <b>Vitora | Smart Pharm</b>\n\n"
+        "📍 <b>Манзил:</b> Самарқанд шаҳри, асосий филиал.\n"
+        "🕒 <b>Иш вақти:</b> 08:00 – 22:00 (дам олиш кунларисиз)\n"
+        "🚚 <b>Етказиб бериш:</b> Самарқанд шаҳри бўйлаб мавжуд.",
+        parse_mode="HTML",
+        reply_markup=main_menu_keyboard()
+    )
+
+
+@bot.message_handler(func=lambda m: m.text == "🌐 Сайт")
+def menu_site(message):
+    ikb = types.InlineKeyboardMarkup()
+    ikb.add(types.InlineKeyboardButton(text="🌐 Каталогни очиш", web_app=types.WebAppInfo(url=WEBAPP_URL)))
+    bot.send_message(
+        message.chat.id,
+        "🌐 <b>Vitora | Smart Pharm</b> онлайн каталогига ўтиш учун пастдаги тугмани босинг 👇",
+        parse_mode="HTML",
+        reply_markup=ikb
+    )
+
+
+@bot.message_handler(func=lambda m: m.text == "💬 Мурожаат")
+def menu_support(message):
+    waiting_support.add(message.from_user.id)
+    bot.send_message(
+        message.chat.id,
+        "✍️ Саволингиз ёки мурожаатингизни ёзиб юборинг — операторларимиз тез орада жавоб беришади:",
+        reply_markup=main_menu_keyboard()
+    )
+
+
+# ================= ADMIN BUYRUQLARI =================
 @bot.message_handler(commands=["products"])
 def cmd_products(message):
     if message.from_user.id != ADMIN_ID:
@@ -311,7 +416,33 @@ def handle_receipt_photo(message):
         f"🆔 ID: <code>{message.from_user.id}</code>"
     )
     bot.send_photo(ADMIN_ID, message.photo[-1].file_id, caption=caption, parse_mode="HTML")
-    bot.reply_to(message, "✅ To'lov chekingiz adminga yuborildi! Tez orada tasdiqlanadi.")
+    bot.reply_to(message, "✅ Тўлов чекингиз админга юборилди! Тез орада тасдиқланади.")
+
+
+@bot.message_handler(func=lambda m: True)
+def handle_text_fallback(message):
+    uid = message.from_user.id
+    if uid in waiting_support:
+        waiting_support.discard(uid)
+        bot.send_message(
+            ADMIN_ID,
+            f"📩 <b>ЯНГИ МУРОЖААТ!</b>\n"
+            f"👤 {message.from_user.first_name} (@{message.from_user.username or 'yoq'})\n"
+            f"🆔 <code>{uid}</code>\n\n"
+            f"💬 {message.text}",
+            parse_mode="HTML"
+        )
+        bot.send_message(
+            message.chat.id,
+            "✅ Мурожаатингиз қабул қилинди! Операторларимиз тез орада сиз билан боғланишади.",
+            reply_markup=main_menu_keyboard()
+        )
+    else:
+        bot.send_message(
+            message.chat.id,
+            "Нима қиламиз? Пастдаги тугмалардан бирини танланг.",
+            reply_markup=main_menu_keyboard()
+        )
 
 
 # ================= WEBHOOK VA FLASK API =================
@@ -394,14 +525,14 @@ def api_order():
 
     if user_id:
         user_msg = (
-            f"✅ <b>Buyurtmangiz #{order_id} qabul qilindi!</b>\n\n"
-            f"💵 Jami summa: <b>{total:,} so'm</b>\n"
-            f"💰 To'lov turi: <b>{payment_method}</b>\n"
+            f"✅ <b>Буюртмангиз #{order_id} қабул қилинди!</b>\n\n"
+            f"💵 Жами сумма: <b>{total:,} сўм</b>\n"
+            f"💰 Тўлов тури: <b>{payment_method}</b>\n"
         )
         if payment_method in ("Click", "Payme"):
-            user_msg += f"\n💳 To'lov uchun karta: <code>{HUMO_CARD}</code>\n📸 To'lov qilgach, chek rasmini shu botga yuboring."
+            user_msg += f"\n💳 Тўлов учун карта: <code>{HUMO_CARD}</code>\n📸 Тўлов қилгач, чек расмини шу ботга юборинг."
         try:
-            bot.send_message(user_id, user_msg, parse_mode="HTML")
+            bot.send_message(user_id, user_msg, parse_mode="HTML", reply_markup=main_menu_keyboard())
         except Exception:
             pass
 
