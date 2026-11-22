@@ -66,42 +66,91 @@ def init_db():
     conn.close()
 
 
-def auto_seed_from_excel():
+def find_col(df, keywords):
+    for col in df.columns:
+        c_low = str(col).strip().lower()
+        for kw in keywords:
+            if kw in c_low:
+                return col
+    return None
+
+
+def auto_seed_from_excel(force=False):
     conn = get_db()
     cur = conn.cursor()
     cur.execute("SELECT COUNT(*) FROM products")
     count = cur.fetchone()[0]
 
-    if count == 0 and os.path.exists(EXCEL_FILE):
+    # Agar baza bo'sh bo'lsa YOKI oldin xato yuklanib narxlar 0 bo'lib qolgan bo'lsa
+    cur.execute("SELECT COUNT(*) FROM products WHERE price > 0")
+    valid_prices = cur.fetchone()[0]
+
+    if (count == 0 or valid_prices == 0 or force) and os.path.exists(EXCEL_FILE):
         try:
+            cur.execute("DELETE FROM products")
             df = pd.read_excel(EXCEL_FILE)
             df.columns = [str(c).strip() for c in df.columns]
+
+            col_name = find_col(df, ["наимен", "товар", "препарат", "nomi", "name", "назван"])
+            col_cat = find_col(df, ["катег", "групп", "kategoriya", "category", "тип"])
+            col_price = find_col(df, ["цен", "narx", "price", "сумм", "стоим", "розм", "розн"])
+            col_stock = find_col(df, ["остат", "кол", "qoldiq", "stock", "наличи"])
+            col_desc = find_col(df, ["опис", "производ", "страна", "срок", "tavsif", "desc"])
+            col_img = find_col(df, ["фото", "картин", "rasm", "image", "img", "url"])
+
             added = 0
             for _, row in df.iterrows():
-                name = str(row.get("Nomi", row.get("Наименование", row.iloc[0]))).strip()
-                if not name or name.lower() == "nan":
+                if col_name:
+                    name = str(row[col_name]).strip()
+                else:
+                    # Raqam bo'lmagan birinchi matnli ustunni olamiz
+                    name = ""
+                    for val in row.values:
+                        s = str(val).strip()
+                        if s and s.lower() != "nan" and not s.replace(".", "").isdigit():
+                            name = s
+                            break
+
+                if not name or name.lower() == "nan" or name.isdigit():
                     continue
-                category = str(row.get("Kategoriya", row.get("Категория", "БАДы"))).strip()
-                if category.lower() == "nan":
+
+                category = str(row[col_cat]).strip() if col_cat else "БАДы"
+                if not category or category.lower() == "nan":
                     category = "БАДы"
 
-                raw_price = row.get("Narxi", row.get("Цена", 0))
-                try:
-                    price = int(float(str(raw_price).replace(" ", "").replace(",", "")))
-                except Exception:
-                    price = 0
+                price = 0
+                if col_price:
+                    raw_p = str(row[col_price]).replace(" ", "").replace(",", ".").replace("сум", "").replace("сўм", "")
+                    try:
+                        price = int(float(re.sub(r"[^\d.]", "", raw_p)))
+                    except Exception:
+                        price = 0
 
-                raw_stock = row.get("Qoldiq", row.get("Остаток", 10))
-                try:
-                    stock = int(float(str(raw_stock).replace(" ", "").replace(",", "")))
-                except Exception:
-                    stock = 10
+                stock = 10
+                if col_stock:
+                    raw_s = str(row[col_stock]).replace(" ", "").replace(",", ".")
+                    try:
+                        stock = int(float(re.sub(r"[^\d.]", "", raw_s)))
+                    except Exception:
+                        stock = 10
 
-                desc = str(row.get("Tavsif", row.get("Описание", ""))).strip()
-                if desc.lower() == "nan":
-                    desc = ""
+                desc = ""
+                if col_desc:
+                    desc = str(row[col_desc]).strip()
+                    if desc.lower() == "nan":
+                        desc = ""
+                else:
+                    # Qolgan matnli ustunlardan qisqa tavsif yig'amiz (ishlab chiqaruvchi, srok)
+                    extra = []
+                    for c in df.columns:
+                        if c in (col_name, col_cat, col_price, col_stock, col_img):
+                            continue
+                        val = str(row[c]).strip()
+                        if val and val.lower() != "nan" and not val.isdigit() and len(val) > 2:
+                            extra.append(val)
+                    desc = " | ".join(extra[:2])
 
-                img = str(row.get("Rasm", row.get("Фото", ""))).strip()
+                img = str(row[col_img]).strip() if col_img else ""
                 if img.lower() == "nan":
                     img = ""
 
@@ -111,7 +160,7 @@ def auto_seed_from_excel():
                 )
                 added += 1
             conn.commit()
-            print(f"Excel fayldan {added} ta mahsulot bazaga yuklandi.")
+            print(f"Excel fayldan {added} ta mahsulot to'g'ri yuklandi.")
         except Exception as e:
             print("Excel yuklashda xatolik:", e)
     conn.close()
@@ -266,12 +315,7 @@ def handle_excel_upload(message):
     with open(EXCEL_FILE, "wb") as f:
         f.write(downloaded)
 
-    conn = get_db()
-    conn.execute("DELETE FROM products")
-    conn.commit()
-    conn.close()
-
-    auto_seed_from_excel()
+    auto_seed_from_excel(force=True)
     conn = get_db()
     total = conn.execute("SELECT COUNT(*) FROM products").fetchone()[0]
     conn.close()
