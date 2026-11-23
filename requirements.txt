@@ -5,3 +5,5 @@ pandas
 openpyxl
 requests
 duckduckgo-search
+opencv-python-headless
+numpy
